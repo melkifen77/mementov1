@@ -33,18 +33,20 @@ export class GenericAdapter implements TraceAdapter {
       }
     }
 
+    const nodeIds = steps.map((step, index) => this.extractId(step, index));
+    
     const nodes: TraceNode[] = steps.map((step, index) => {
       const type = this.detectType(step);
       const content = this.extractContent(step);
       const confidence = this.extractConfidence(step);
       
       return {
-        id: this.extractId(step, index),
+        id: nodeIds[index],
         type,
         content,
         timestamp: this.extractTimestamp(step),
         confidence,
-        parentId: this.extractParentId(step, index, steps),
+        parentId: this.extractParentId(step, index, nodeIds),
         order: step.order !== undefined ? step.order : index,
         metadata: this.sanitizeMetadata(step)
       };
@@ -204,7 +206,7 @@ export class GenericAdapter implements TraceAdapter {
     return num;
   }
 
-  private extractParentId(step: any, index: number, allSteps: any[]): string | null {
+  private extractParentId(step: any, index: number, nodeIds: string[]): string | null {
     const explicitParent = step.parentId || 
                           step.parent_id || 
                           step.parent ||
@@ -214,12 +216,7 @@ export class GenericAdapter implements TraceAdapter {
     
     if (index === 0) return null;
     
-    const previousStep = allSteps[index - 1];
-    if (previousStep) {
-      return this.extractId(previousStep, index - 1);
-    }
-    
-    return null;
+    return nodeIds[index - 1] || null;
   }
 
   private detectType(step: any): NodeType {
