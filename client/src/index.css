@@ -43,9 +43,22 @@
   --chart-3: 271 91% 65%;
   --chart-4: 142 76% 36%;
   --chart-5: 340 82% 52%;
-  --font-sans: Open Sans, sans-serif;
+  --font-sans: Inter, sans-serif;
   --font-serif: Georgia, serif;
-  --font-mono: Menlo, monospace;
+  --font-mono: JetBrains Mono, monospace;
+  
+  --node-thought: 217 91% 60%;
+  --node-thought-bg: 217 91% 97%;
+  --node-action: 24 90% 58%;
+  --node-action-bg: 24 90% 97%;
+  --node-output: 271 91% 65%;
+  --node-output-bg: 271 91% 97%;
+  --node-observation: 142 76% 45%;
+  --node-observation-bg: 142 76% 97%;
+  --node-system: 240 6% 60%;
+  --node-system-bg: 240 6% 97%;
+  --node-other: 240 6% 50%;
+  --node-other-bg: 240 6% 97%;
   --radius: .5rem;
   --shadow-2xs: 0px 2px 0px 0px hsl(240 6% 10% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(240 6% 10% / 0.00);
@@ -127,6 +140,19 @@
   --chart-3: 271 91% 75%;
   --chart-4: 142 76% 56%;
   --chart-5: 340 82% 62%;
+  
+  --node-thought: 217 91% 65%;
+  --node-thought-bg: 217 91% 15%;
+  --node-action: 24 90% 63%;
+  --node-action-bg: 24 90% 15%;
+  --node-output: 271 91% 70%;
+  --node-output-bg: 271 91% 15%;
+  --node-observation: 142 76% 50%;
+  --node-observation-bg: 142 76% 15%;
+  --node-system: 240 6% 65%;
+  --node-system-bg: 240 6% 15%;
+  --node-other: 240 6% 60%;
+  --node-other-bg: 240 6% 15%;
   --shadow-2xs: 0px 2px 0px 0px hsl(240 5% 96% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(240 5% 96% / 0.00);
   --shadow-sm: 0px 2px 0px 0px hsl(240 5% 96% / 0.00), 0px 1px 2px -1px hsl(240 5% 96% / 0.00);
