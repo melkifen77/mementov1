@@ -77,9 +77,9 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
           </div>
         </div>
         
-        <p className="text-sm line-clamp-3 text-card-foreground">
+        <pre className="text-xs line-clamp-4 text-card-foreground font-mono whitespace-pre-wrap break-words overflow-hidden">
           {data.content}
-        </p>
+        </pre>
         
         {data.confidence !== undefined && (
           <div className="flex items-center gap-2">
