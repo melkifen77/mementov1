@@ -74,9 +74,9 @@ export function NodeInspector({ node, onClose }: NodeInspectorProps) {
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Content
               </label>
-              <p className="mt-2 text-sm leading-relaxed" data-testid="text-node-content">
+              <pre className="mt-2 text-sm leading-relaxed font-mono whitespace-pre-wrap break-words" data-testid="text-node-content">
                 {node.content}
-              </p>
+              </pre>
             </div>
 
             {node.timestamp && (
