@@ -10,6 +10,28 @@ The application accepts flexible JSON trace formats, normalizes them into a unif
 
 Preferred communication style: Simple, everyday language.
 
+## Recent Improvements (November 2025)
+
+### UI/UX Polish
+- **UploadZone**: Enhanced with animated gradient title, sparkles icon, improved drag-over states (border/shadow changes only - no layout shifts), better error handling
+- **CustomTraceNode**: Improved shadows (sm to md/lg), subtle hover effects, enhanced error detection matching NodeInspector logic
+- **TimelineView**: Added Clock icon, improved spacing (gap-6), better badge styling, background for content sections, max-width container
+- **TraceGraph**: Added BackgroundVariant.Dots, polished Controls positioning, improved MiniMap styling, better edge colors
+
+### Error Handling & Recovery
+- **ErrorBoundary**: New component for graceful error handling with dual recovery options:
+  - "Try Again" (primary) - Preserves in-memory state, just clears error
+  - "Return to Home" (secondary) - Full refresh for persistent errors
+  - Expandable error details for debugging
+
+### Export Experience
+- **ExportDialog**: Added loading states, better descriptions, auto-close on empty export, improved error handling
+
+### Layout Stability
+- Strict adherence to no-layout-shift-on-hover policy
+- All hover interactions use shadow/border/color changes only (no scale transforms)
+- Interactive controls maintain consistent sizing
+
 ## System Architecture
 
 ### Frontend Architecture
