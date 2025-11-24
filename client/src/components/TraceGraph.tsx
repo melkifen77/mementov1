@@ -49,24 +49,20 @@ export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
     });
 
     const edges: Edge[] = [];
+    const edgeSet = new Set<string>();
+    
     trace.nodes.forEach((node) => {
       if (node.parentId) {
-        edges.push({
-          id: `${node.parentId}-${node.id}`,
-          source: node.parentId,
-          target: node.id,
-          type: ConnectionLineType.SmoothStep,
-          animated: true,
-        });
-      } else if (node.order !== undefined && node.order > 0) {
-        const previousNode = trace.nodes.find(n => n.order === (node.order! - 1));
-        if (previousNode) {
+        const edgeId = `${node.parentId}-${node.id}`;
+        if (!edgeSet.has(edgeId)) {
           edges.push({
-            id: `${previousNode.id}-${node.id}`,
-            source: previousNode.id,
+            id: edgeId,
+            source: node.parentId,
             target: node.id,
             type: ConnectionLineType.SmoothStep,
+            animated: false,
           });
+          edgeSet.add(edgeId);
         }
       }
     });

@@ -1,0 +1,123 @@
+Yes — you should 100% send Replit a “fix query”, and here’s why:
+
+Your screenshots show the visualizer can render the traces — BUT — the fact that the same JSON pasted into the input box triggers:
+
+Invalid JSON
+Objects are not valid as a React child…
+
+means one thing:
+
+⚠️ The Replit implementation is not parsing JSON the right way.
+
+Right now your MVP is only working when trace data is already pre-parsed into Memento’s internal node structure, not when raw JSON is pasted. That’s a core blocker for your product.
+
+To move forward properly, Replit MUST:
+
+⸻
+
+✅ What to tell Replit (copy–paste this)
+
+Tell them this exactly:
+
+⸻
+
+Hey! I need the visualizer to accept any type of agent trace JSON — not a specific schema — and normalize it into a unified internal format before rendering. Right now the UI breaks when pasting raw JSON (“Invalid JSON / Objects are not valid as a React child”), which means the parsing layer is missing.
+
+Here’s what I need the parser to do:
+
+1. Accept flexible trace formats
+
+The tool must work with JSON from:
+	•	LangChain
+	•	LangGraph
+	•	OpenAI ReAct-style logs
+	•	AgentQL / ReAct / Tool calling traces
+	•	Custom agent frameworks
+Raw traces can vary a lot, so we need a normalizer.
+
+2. Normalize to a unified model
+
+Every trace item should be converted into:
+
+{
+  "id": "uuid",
+  "type": "thought" | "action" | "observation" | "output" | "other",
+  "content": "string",
+  "metadata": {},
+  "timestamp": "...",
+  "parentId": "id or null"
+}
+
+3. Detect step type automatically
+
+Based on keywords:
+	•	“Thought”, “thinking”, “reasoning” → thought
+	•	“Action”, “tool”, “call” → action
+	•	“Observation”, “result”, “response” → observation
+	•	“Final Answer”, “Output” → output
+
+4. Support ANY JSON shape
+
+The parser must accept:
+	•	Arrays of flat steps
+	•	Nested structures
+	•	Objects containing sub-fields like tool_calls, intermediate_steps, etc.
+
+5. Build a linear or hierarchical flow automatically
+
+If no parent/child info exists → infer order by sequence.
+
+6. Prevent React errors
+
+Do not pass raw objects into JSX.
+Render only strings.
+Objects must be stringified safely inside nodes.
+
+⸻
+
+🧪 Test Data (send this too)
+
+Tell Replit “This is REAL agent trace data. The tool must parse this.”
+
+Trace 1
+
+[
+  {"type":"thought","content":"User asked for trending AI topics."},
+  {"type":"action","content":"fetch_trends()"},
+  {"type":"observation","content":"AI agents, RAG search, synthetic data"},
+  {"type":"output","content":"Top AI topics are Agents, RAG, Synthetic Data."}
+]
+
+Trace 2
+
+[
+  {"type":"thought","content":"Start reasoning about best restaurant."},
+  {"type":"thought","content":"Check user location."},
+  {"type":"action","content":"maps.search('restaurants near Paris')"},
+  {"type":"observation","content":"Returned 50 restaurants."},
+  {"type":"output","content":"Recommendation: L'Ami Jean."}
+]
+
+Trace 3
+
+[
+  {"type":"thought","content":"Classify support ticket."},
+  {"type":"action","content":"embeddings.search(ticket_text)"},
+  {"type":"observation","content":"billing issue / card declined"},
+  {"type":"thought","content":"User confused by renewal flow."},
+  {"type":"action","content":"db.query('SELECT * FROM billing WHERE user_id=123')"},
+  {"type":"observation","content":"payment method expired"},
+  {"type":"output","content":"Ask user to update card."}
+]
+
+
+⸻
+
+🎯 Final Answer to Your Question:
+
+Yes — you must send Replit a fix request.
+Even though the traces render once inside Memento, the JSON ingestion layer is broken, and the MVP cannot be used by anyone until this is fixed.
+
+You now have a clean, professional brief to send them.
+
+Want me to write the exact message you will paste into Replit chat?
