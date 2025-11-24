@@ -73,6 +73,81 @@ Copy and paste these JSON traces into the visualizer to test the ingestion layer
 ]
 ```
 
+## Trace 7: Nested Object Structure
+```json
+[
+  {
+    "agent": "planner",
+    "thought": "Break down user request into steps"
+  },
+  {
+    "action": {
+      "tool": "db_query",
+      "tool_input": "SELECT * FROM users WHERE active = true"
+    }
+  },
+  {
+    "observation": {
+      "result": "Found 150 active users"
+    }
+  },
+  {
+    "output": "Query successful, 150 users found"
+  }
+]
+```
+
+## Trace 8: Complex Nested with Multiple Keys
+```json
+[
+  {
+    "thought": "Analyze the problem",
+    "action": {
+      "tool": "search_engine",
+      "input": "best practices for API design"
+    },
+    "observation": {
+      "result": ["RESTful principles", "GraphQL", "gRPC"]
+    }
+  },
+  {
+    "thought": "Compare options",
+    "final_answer": "Recommend REST for this use case"
+  }
+]
+```
+
+## Trace 9: Raw String Input
+```json
+"This is a simple trace with just a string"
+```
+
+## Trace 10: LangChain-style Nested
+```json
+{
+  "run_id": "lc-456",
+  "intermediate_steps": [
+    {
+      "action": {
+        "tool": "calculator",
+        "tool_input": "15 * 7"
+      }
+    },
+    {
+      "observation": {
+        "result": 105
+      }
+    },
+    {
+      "thought": "Calculation complete"
+    },
+    {
+      "output": "The answer is 105"
+    }
+  ]
+}
+```
+
 ## Supported JSON Formats
 
 The adapter handles:
