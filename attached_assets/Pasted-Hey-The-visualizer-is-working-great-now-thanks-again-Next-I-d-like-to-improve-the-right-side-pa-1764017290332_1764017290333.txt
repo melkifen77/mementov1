@@ -1,0 +1,121 @@
+Hey! The visualizer is working great now — thanks again.
+Next, I’d like to improve the right-side panel and overall interaction. Here’s what I need added:
+
+⸻
+
+1. Improve the Side Panel (Node Details)
+
+When a node is clicked, the side panel should show:
+
+A. Clean Metadata View
+	•	type
+	•	id
+	•	parent
+	•	timestamp (if present)
+	•	agent name (if present)
+	•	tool_name and tool_input (if present)
+	•	Raw JSON highlighted/expandable
+
+Right now it’s too empty — we need a richer overview.
+
+⸻
+
+2. Raw JSON Viewer Section
+
+Add a collapsible “Raw Metadata” section:
+	•	Format JSON nicely
+	•	Syntax highlighting
+	•	Expand/collapse nested fields
+	•	Scrollable inside the panel
+
+Use something like a minimal JSON viewer, doesn’t need to be fancy.
+
+⸻
+
+3. Node Linking & Navigation
+
+Inside the side panel:
+	•	Clicking on parent node ID should auto-scroll to that node
+	•	Clicking on children (if multiple) should navigate as well
+
+This makes large traces much easier to explore.
+
+⸻
+
+4. Multi-node Selection (Future-proofing)
+
+Not needed immediately, but please structure code so later we can add:
+	•	Shift-click to select a sub-tree
+	•	View aggregated metadata
+
+Just keep code modular to allow this later.
+
+⸻
+
+5. Add Support for Step Ordering Info
+
+If JSON contains fields like:
+	•	step_number
+	•	depth
+	•	parent_step
+
+Display them.
+If not, infer order as you already do.
+
+This helps for hierarchical traces.
+
+⸻
+
+6. Color-coded Metadata Badges
+
+In the panel, add small badges next to metadata fields:
+	•	thought → blue
+	•	action → orange
+	•	observation → green
+	•	output → purple
+	•	other → gray
+
+This matches the graph colors and helps readability.
+
+⸻
+
+7. Add a “Copy Node JSON” Button
+
+Quick button to copy the JSON for a specific node.
+
+⸻
+
+8. Error Highlighting (Optional, but useful)
+
+If the JSON includes fields like:
+	•	"error": true
+	•	"exception"
+	•	"status": "failed"
+
+→ Automatically highlight the node as red and show “Error Trace” in the side panel.
+
+⸻
+
+9. Add Keyboard Navigation
+
+Simple version:
+	•	Arrow keys → move between siblings
+	•	Enter → open panel
+	•	Escape → close panel
+
+Again, not required now, but structure code so this can be plugged in.
+
+⸻
+
+10. Make the Panel Resizable
+
+Allow user to drag its width.
+
+⸻
+
+That’s all for now!
+
+These additions will make the visualizer far more useful, especially for large traces and compliance/debugging workflows.
+Let me know when you can start implementing these!
+
+⸻

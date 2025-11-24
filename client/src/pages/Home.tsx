@@ -31,6 +31,14 @@ export default function Home() {
     setSelectedNode(null);
   };
 
+  const handleNavigateToNode = (nodeId: string) => {
+    const targetNode = trace?.nodes.find(n => n.id === nodeId);
+    if (targetNode) {
+      setSelectedNode(targetNode);
+      // TODO: Scroll to node in graph/timeline view
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-background">
       <header className="h-16 border-b border-border bg-background/95 backdrop-blur-xl flex items-center justify-between px-6 z-40">
@@ -94,7 +102,12 @@ export default function Home() {
         )}
 
         {selectedNode && (
-          <NodeInspector node={selectedNode} onClose={() => setSelectedNode(null)} />
+          <NodeInspector 
+            node={selectedNode} 
+            trace={trace}
+            onClose={() => setSelectedNode(null)} 
+            onNavigateToNode={handleNavigateToNode}
+          />
         )}
       </main>
     </div>
