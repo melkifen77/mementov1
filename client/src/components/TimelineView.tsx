@@ -2,7 +2,7 @@ import { TraceRun, TraceNode } from '@shared/models';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AlertCircle, TrendingDown } from 'lucide-react';
+import { AlertCircle, TrendingDown, Clock } from 'lucide-react';
 
 interface TimelineViewProps {
   trace: TraceRun;
@@ -28,25 +28,31 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
 
   return (
     <ScrollArea className="h-full w-full">
-      <div className="p-8 space-y-6" data-testid="timeline-view">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-semibold">Timeline View</h2>
+      <div className="p-8 max-w-5xl mx-auto space-y-6" data-testid="timeline-view">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Clock className="h-6 w-6 text-primary" />
+            <h2 className="text-2xl font-semibold">Timeline View</h2>
+          </div>
           <p className="text-sm text-muted-foreground">
             Chronological sequence of {trace.nodes.length} reasoning steps
           </p>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-5">
           {sortedNodes.map((node, index) => {
             const colors = nodeColors[node.type] || nodeColors.other;
             const hasLowConfidence = node.confidence !== undefined && node.confidence < 0.6;
-            const hasError = node.metadata?.status === 'error';
+            const hasError = node.metadata?.error === true || 
+                           !!node.metadata?.exception || 
+                           node.metadata?.status === 'failed' ||
+                           node.metadata?.status === 'error';
 
             return (
               <div key={node.id} className="flex gap-4 group">
                 <div className="flex flex-col items-center">
                   <div 
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold shadow-md"
                     style={{ 
                       backgroundColor: colors.border,
                       color: 'white'
@@ -56,23 +62,24 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                   </div>
                   {index < sortedNodes.length - 1 && (
                     <div 
-                      className="w-0.5 flex-1 min-h-[60px]"
-                      style={{ backgroundColor: colors.border }}
+                      className="w-0.5 flex-1 min-h-[80px] mt-1"
+                      style={{ backgroundColor: colors.border, opacity: 0.3 }}
                     />
                   )}
                 </div>
 
                 <Card
-                  className="flex-1 p-4 cursor-pointer hover-elevate active-elevate-2 transition-shadow"
+                  className="flex-1 p-5 cursor-pointer hover-elevate active-elevate-2 transition-all duration-200"
                   style={{ borderLeftWidth: '4px', borderLeftColor: colors.border }}
                   onClick={() => onNodeClick(node)}
                   data-testid={`timeline-node-${node.id}`}
                 >
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge
                           variant="outline"
+                          className="font-medium"
                           style={{ borderColor: colors.border, color: colors.text }}
                         >
                           {node.type}
@@ -84,7 +91,7 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                           </Badge>
                         )}
                         {hasError && (
-                          <Badge variant="outline" className="text-destructive border-destructive">
+                          <Badge variant="destructive">
                             <AlertCircle className="h-3 w-3 mr-1" />
                             Error
                           </Badge>
@@ -97,22 +104,22 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                       )}
                     </div>
 
-                    <pre className="text-sm leading-relaxed font-mono whitespace-pre-wrap break-words">
+                    <pre className="text-sm leading-relaxed font-mono whitespace-pre-wrap break-words bg-muted/30 p-3 rounded-md">
                       {node.content}
                     </pre>
 
                     {node.confidence !== undefined && (
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="flex items-center gap-3 pt-1">
+                        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                           <div
-                            className="h-full transition-all"
+                            className="h-full transition-all duration-300"
                             style={{
                               width: `${node.confidence * 100}%`,
                               backgroundColor: colors.border,
                             }}
                           />
                         </div>
-                        <span className="text-xs text-muted-foreground font-medium">
+                        <span className="text-xs text-muted-foreground font-medium min-w-[3rem] text-right">
                           {Math.round(node.confidence * 100)}%
                         </span>
                       </div>

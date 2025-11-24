@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Upload, FileJson } from 'lucide-react';
+import { Upload, FileJson, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
@@ -57,6 +57,12 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
         }
       };
       reader.readAsText(file);
+    } else {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload a JSON file",
+        variant: "destructive"
+      });
     }
   };
 
@@ -73,12 +79,17 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[600px] px-4">
-      <div className="w-full max-w-4xl space-y-6">
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-semibold tracking-tight">Agent Trace Visualizer</h1>
-          <p className="text-muted-foreground text-lg">
-            Upload or paste your JSON trace to visualize the reasoning flow
+    <div className="flex flex-col items-center justify-center min-h-[600px] px-4 py-8">
+      <div className="w-full max-w-4xl space-y-8">
+        <div className="text-center space-y-3">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Sparkles className="h-8 w-8 text-primary" />
+          </div>
+          <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-br from-foreground to-foreground/60 bg-clip-text text-transparent">
+            Agent Trace Visualizer
+          </h1>
+          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+            Transform raw agent logs into interactive visual reasoning maps. Support for LangChain, OpenAI, and custom formats.
           </p>
         </div>
 
@@ -89,24 +100,37 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
             setIsDragging(true);
           }}
           onDragLeave={() => setIsDragging(false)}
-          className={`border-2 border-dashed rounded-lg p-8 transition-colors ${
-            isDragging ? 'border-primary bg-primary/5' : 'border-border'
+          className={`border-2 border-dashed rounded-xl p-12 transition-all duration-200 ${
+            isDragging 
+              ? 'border-primary bg-primary/10 shadow-lg' 
+              : 'border-border hover:border-primary/50 hover:bg-accent/5'
           }`}
           data-testid="dropzone-upload"
         >
           <div className="flex flex-col items-center gap-4">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Upload className="h-8 w-8" />
-              <FileJson className="h-8 w-8" />
+            <div className="relative">
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <div className="relative">
+                  <Upload className="h-10 w-10" />
+                  {isDragging && (
+                    <div className="absolute inset-0 animate-ping">
+                      <Upload className="h-10 w-10 text-primary" />
+                    </div>
+                  )}
+                </div>
+                <FileJson className="h-10 w-10" />
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-sm font-medium">Drop JSON file here or</p>
-              <label htmlFor="file-upload" className="text-primary hover:underline cursor-pointer font-medium text-sm">
-                browse files
+            <div className="text-center space-y-1">
+              <p className="text-base font-medium">
+                {isDragging ? 'Drop your file here' : 'Drop JSON file here'}
+              </p>
+              <label htmlFor="file-upload" className="text-primary hover:underline cursor-pointer font-medium text-sm inline-block">
+                or browse files
                 <input
                   id="file-upload"
                   type="file"
-                  accept=".json"
+                  accept=".json,application/json"
                   className="hidden"
                   onChange={handleFileSelect}
                   data-testid="input-file-upload"
@@ -116,16 +140,22 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
           </div>
         </div>
 
-        <div className="space-y-4">
-          <label htmlFor="json-input" className="text-sm font-medium">
-            Or paste JSON directly
-          </label>
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-background px-2 text-muted-foreground">Or paste JSON directly</span>
+          </div>
+        </div>
+
+        <div className="space-y-3">
           <Textarea
             id="json-input"
-            placeholder='{"steps": [{"id": "1", "type": "thought", "content": "..."}]}'
+            placeholder='{"steps": [{"type": "thought", "content": "Analyzing the problem..."}]}'
             value={jsonInput}
             onChange={(e) => setJsonInput(e.target.value)}
-            className="font-mono text-sm min-h-[200px] resize-y"
+            className="font-mono text-sm min-h-[240px] resize-y"
             data-testid="textarea-json-input"
           />
           <Button
@@ -134,8 +164,13 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
             size="lg"
             data-testid="button-visualize"
           >
+            <Sparkles className="h-4 w-4 mr-2" />
             Visualize Trace
           </Button>
+        </div>
+
+        <div className="text-center text-sm text-muted-foreground">
+          <p>Supports flexible JSON formats from any agent framework</p>
         </div>
       </div>
     </div>

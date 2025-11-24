@@ -44,62 +44,72 @@ const nodeColors = {
 function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
   const colors = nodeColors[data.type] || nodeColors.other;
   const hasLowConfidence = data.confidence !== undefined && data.confidence < 0.6;
-  const hasError = data.metadata?.status === 'error';
+  const hasError = data.metadata?.error === true || 
+                   !!data.metadata?.exception || 
+                   data.metadata?.status === 'failed' ||
+                   data.metadata?.status === 'error';
 
   return (
     <div
       onClick={() => data.onNodeClick?.(data)}
-      className="rounded-md shadow-md hover:shadow-lg transition-shadow cursor-pointer min-w-[200px] max-w-[300px]"
+      className="rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 cursor-pointer min-w-[220px] max-w-[300px] hover:scale-[1.02]"
       style={{
         backgroundColor: colors.bg,
-        borderLeft: `4px solid ${colors.border}`
+        borderLeft: `4px solid ${colors.border}`,
+        boxShadow: hasError 
+          ? '0 10px 15px -3px rgba(239, 68, 68, 0.3), 0 4px 6px -4px rgba(239, 68, 68, 0.3)'
+          : undefined
       }}
       data-testid={`node-${data.id}`}
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Left} className="!bg-border !w-3 !h-3" />
       
-      <div className="p-3 space-y-2">
+      <div className="p-4 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <Badge 
             variant="outline" 
-            className="text-xs"
+            className="text-xs font-medium"
             style={{ color: colors.text, borderColor: colors.border }}
           >
             {data.type}
           </Badge>
           <div className="flex items-center gap-1">
             {hasLowConfidence && (
-              <TrendingDown className="h-3 w-3 text-yellow-600" />
+              <div className="flex items-center gap-0.5 text-yellow-600">
+                <TrendingDown className="h-3.5 w-3.5" />
+              </div>
             )}
             {hasError && (
-              <AlertCircle className="h-3 w-3 text-destructive" />
+              <div className="flex items-center gap-0.5 text-destructive">
+                <AlertCircle className="h-3.5 w-3.5" />
+              </div>
             )}
           </div>
         </div>
         
-        <pre className="text-xs line-clamp-4 text-card-foreground font-mono whitespace-pre-wrap break-words overflow-hidden">
+        <pre className="text-xs line-clamp-4 text-card-foreground font-mono whitespace-pre-wrap break-words overflow-hidden leading-relaxed">
           {data.content}
         </pre>
         
         {data.confidence !== undefined && (
           <div className="flex items-center gap-2">
-            <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
               <div
-                className="h-full transition-all"
+                className="h-full transition-all duration-300"
                 style={{
                   width: `${data.confidence * 100}%`,
                   backgroundColor: colors.border
                 }}
               />
             </div>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground font-medium">
               {Math.round(data.confidence * 100)}%
             </span>
           </div>
         )}
       </div>
       
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Right} className="!bg-border !w-3 !h-3" />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   Node,
   Edge,
   ConnectionLineType,
+  BackgroundVariant,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { TraceRun, TraceNode } from '@shared/models';
@@ -37,7 +38,7 @@ export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
         const childIndex = childrenOfParent.findIndex(n => n.id === node.id);
         
         xPosition = (parentIndex + 1) * 350;
-        yPosition = 100 + (childIndex * 150);
+        yPosition = 100 + (childIndex * 160);
       }
 
       return {
@@ -61,6 +62,10 @@ export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
             target: node.id,
             type: ConnectionLineType.SmoothStep,
             animated: false,
+            style: { 
+              strokeWidth: 2,
+              stroke: 'hsl(var(--border))'
+            }
           });
           edgeSet.add(edgeId);
         }
@@ -85,10 +90,21 @@ export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
         nodeTypes={nodeTypes}
         connectionLineType={ConnectionLineType.SmoothStep}
         fitView
+        fitViewOptions={{ padding: 0.3 }}
+        minZoom={0.1}
+        maxZoom={1.5}
         proOptions={proOptions}
       >
-        <Background />
-        <Controls />
+        <Background 
+          variant={BackgroundVariant.Dots} 
+          gap={16} 
+          size={1}
+          color="hsl(var(--border))"
+        />
+        <Controls 
+          showInteractive={false}
+          className="!shadow-lg !border !border-border"
+        />
         <MiniMap 
           nodeColor={(node) => {
             const data = node.data as any;
@@ -103,6 +119,8 @@ export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
             };
             return colors[nodeType] || colors.other;
           }}
+          className="!shadow-lg !border !border-border !rounded-lg"
+          maskColor="hsl(var(--background) / 0.8)"
         />
       </ReactFlow>
     </div>
