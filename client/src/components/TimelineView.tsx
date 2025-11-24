@@ -97,7 +97,9 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                       )}
                     </div>
 
-                    <p className="text-sm leading-relaxed">{node.content}</p>
+                    <pre className="text-sm leading-relaxed font-mono whitespace-pre-wrap break-words">
+                      {node.content}
+                    </pre>
 
                     {node.confidence !== undefined && (
                       <div className="flex items-center gap-3">
