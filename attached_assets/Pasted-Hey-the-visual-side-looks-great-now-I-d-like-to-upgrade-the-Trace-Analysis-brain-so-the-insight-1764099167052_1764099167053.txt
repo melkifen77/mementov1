@@ -1,0 +1,78 @@
+Hey, the visual side looks great – now I’d like to upgrade the Trace Analysis “brain” so the insights are actually useful for debugging agents.
+
+Right now I’m seeing two main problems:
+	•	A flight-booking trace where:
+	•	Observation: flights: [] (no flights)
+	•	Thought: “No flights returned, continuing anyway.”
+	•	Action: payment_api
+	•	Output: “Flight booked successfully!”
+→ The panel still shows Risk: Low with only “1 missing observation / 1 suspicious transition”.
+	•	A weather trace where:
+	•	Observation: ERROR: quota exceeded
+	•	Thought: “API failed. I’ll just guess based on season.”
+	•	Output: “It’s probably sunny in Madrid today.”
+→ The panel shows Risk: Low / No issues detected, even though this is exactly “API error → hallucinated answer”.
+
+For the tool to be convincing to real LangGraph / agent users, we need a slightly smarter but still deterministic analysis pipeline.
+
+What I’d like the analysis brain to do
+	1.	Normalize all traces
+Internally normalize every step to a common shape, regardless of source (flat array, trace.steps, intermediate_steps, etc.):
+
+{
+  id: string
+  type: "thought" | "action" | "observation" | "output" | "other"
+  content: string
+  tool_name?: string
+  tool_input?: any
+  tool_output?: any
+  parent_id?: string
+  timestamp?: number
+}
+
+
+	2.	Derive simple labels per step
+For each normalized step, compute booleans like:
+	•	is_error_observation – content or tool_output includes things like
+"error", "failed", "exception", "quota exceeded", "timeout", HTTP 4xx/5xx codes, etc.
+	•	is_empty_result – empty array/object or phrases like "no results", "no flights", "not found".
+	•	is_commit_action – tool_name in a commit list (e.g. payment / booking / db_write / update / delete / charge).
+	•	is_speculative_text – thought/output text with "guess", "probably", "I think", "I'll assume", "likely", etc.
+	•	has_observation_for_previous_action – whether the previous action gets a matching observation for the same tool.
+	3.	Run rule-based detectors
+Use those labels to fire a small set of rules:
+	•	Guessing after error (High)
+	•	Pattern: error observation → next thought/output is speculative.
+	•	Issue: “API error, but agent guessed the answer instead of handling it.”
+	•	Commit after empty result (High)
+	•	Pattern: empty result observation → later commit action or a success-sounding output (booked/purchased/created).
+	•	Issue: “Committed (payment/booking/write) with empty or missing data.”
+	•	Missing observation (Medium)
+	•	Pattern: an action with no observation for that tool in the rest of the trace.
+	•	Issue: “Tool X has no observation – result missing or not logged.”
+	•	Unhandled error (Medium)
+	•	Pattern: there is an error observation, but the trace still ends in a normal, confident output with no error surfaced to the user.
+	•	Issue: “Error from X not handled – agent continued as if successful.”
+	•	Multi-error trace summary (Low/Medium)
+	•	If ≥2 error observations, add “This trace had N tool errors – consider more robust retry/fallback strategy.”
+	4.	Risk scoring
+	•	If any High issue: Risk: High (red).
+	•	Else if any Medium issue: Risk: Medium (amber).
+	•	Else: Risk: Low (green).
+Always show some small stats in the panel: total actions, # errors, # issues by category.
+	5.	Attach issues to specific nodes/edges
+Each issue should store the node_id (and/or edge from→to), plus:
+	•	short label
+	•	explanation
+	•	one-line suggestion, e.g.:
+	•	“Booked with empty flights list – add a guardrail that checks flights.length > 0 before calling payment_api.”
+	•	“Weather API failed (quota exceeded) – return an explicit error instead of guessing.”
+Clicking an issue should select that node/edge and show the explanation + suggestion in the side panel.
+	6.	Same logic for all formats
+The heuristics above should run on the normalized trace, regardless of whether the original source is array, generic, trace.steps, or intermediate_steps. Right now it seems source: generic doesn’t benefit from the error rules.
+
+If we implement these rules, the two example traces above should both be clearly flagged as High risk, with very concrete explanations. That will make the tool feel actually helpful for debugging instead of just a pretty graph.
+
+Let me know if you want me to add more example traces or edge cases to guide the heuristics.
+
+⸻

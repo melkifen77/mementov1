@@ -6,7 +6,10 @@ export type IssueType =
   | 'suspicious_transition'
   | 'contradiction_candidate'
   | 'error_ignored'
-  | 'empty_result';
+  | 'empty_result'
+  | 'guessing_after_error'
+  | 'commit_after_empty'
+  | 'unhandled_error';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
@@ -45,6 +48,13 @@ export interface LangGraphDetails {
   edges?: string[];
 }
 
+export interface TraceStats {
+  totalNodes: number;
+  totalActions: number;
+  totalErrors: number;
+  issuesByType: Record<IssueType, number>;
+}
+
 export interface TraceRun {
   id: string;
   source?: string;
@@ -53,6 +63,7 @@ export interface TraceRun {
   riskLevel?: RiskLevel;
   riskExplanation?: string;
   issueSummary?: Record<IssueType, number>;
+  stats?: TraceStats;
 }
 
 export interface Step {

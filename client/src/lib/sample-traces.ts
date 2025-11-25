@@ -223,6 +223,103 @@ export const SAMPLE_WITH_ISSUES = {
   ]
 };
 
+export const SAMPLE_FLIGHT_BOOKING_ISSUE = {
+  "run_id": "flight-booking-fail-001",
+  "agent_type": "travel_agent",
+  "description": "Flight booking with empty data - should trigger High risk",
+  "steps": [
+    {
+      "id": "fb-1",
+      "type": "thought",
+      "content": "User wants to book a flight from NYC to LAX. Let me search for available flights.",
+      "timestamp": "2024-01-15T09:00:00Z"
+    },
+    {
+      "id": "fb-2",
+      "type": "action",
+      "tool": "search_flights",
+      "tool_input": {"from": "NYC", "to": "LAX", "date": "2024-02-15"},
+      "content": "Searching for flights from NYC to LAX on 2024-02-15",
+      "timestamp": "2024-01-15T09:00:02Z"
+    },
+    {
+      "id": "fb-3",
+      "type": "observation",
+      "content": "flights: []",
+      "tool_output": {"flights": [], "count": 0},
+      "timestamp": "2024-01-15T09:00:04Z"
+    },
+    {
+      "id": "fb-4",
+      "type": "thought",
+      "content": "No flights returned, continuing anyway. I'll proceed with the booking.",
+      "timestamp": "2024-01-15T09:00:05Z"
+    },
+    {
+      "id": "fb-5",
+      "type": "action",
+      "tool": "payment_api",
+      "tool_input": {"amount": 450, "currency": "USD", "flight_id": null},
+      "content": "Processing payment for flight booking",
+      "timestamp": "2024-01-15T09:00:06Z"
+    },
+    {
+      "id": "fb-6",
+      "type": "observation",
+      "content": "Payment processed successfully. Transaction ID: TXN-12345",
+      "timestamp": "2024-01-15T09:00:08Z"
+    },
+    {
+      "id": "fb-7",
+      "type": "output",
+      "content": "Flight booked successfully! Your confirmation number is ABC123. You're all set for your trip from NYC to LAX!",
+      "timestamp": "2024-01-15T09:00:10Z"
+    }
+  ]
+};
+
+export const SAMPLE_WEATHER_API_ERROR = {
+  "run_id": "weather-hallucination-001",
+  "agent_type": "weather_assistant",
+  "description": "Weather API fails, agent hallucinates - should trigger High risk",
+  "steps": [
+    {
+      "id": "wx-1",
+      "type": "thought",
+      "content": "User wants to know the weather in Madrid. Let me check the weather API.",
+      "timestamp": "2024-01-15T14:00:00Z"
+    },
+    {
+      "id": "wx-2",
+      "type": "action",
+      "tool": "weather_api",
+      "tool_input": {"city": "Madrid", "country": "Spain"},
+      "content": "Fetching weather data for Madrid, Spain",
+      "timestamp": "2024-01-15T14:00:01Z"
+    },
+    {
+      "id": "wx-3",
+      "type": "observation",
+      "content": "ERROR: API quota exceeded. Rate limit reached. No data available.",
+      "status": "error",
+      "error": true,
+      "timestamp": "2024-01-15T14:00:02Z"
+    },
+    {
+      "id": "wx-4",
+      "type": "thought",
+      "content": "API failed. I'll just guess based on season. It's January, so probably cool but Madrid has mild winters.",
+      "timestamp": "2024-01-15T14:00:03Z"
+    },
+    {
+      "id": "wx-5",
+      "type": "output",
+      "content": "It's probably sunny in Madrid today with temperatures around 12°C (54°F). Great weather for sightseeing! Don't forget a light jacket for the evening.",
+      "timestamp": "2024-01-15T14:00:05Z"
+    }
+  ]
+};
+
 export const SAMPLE_LANGGRAPH_FULL = {
   "run_id": "lg-full-trace-001",
   "langgraph_version": "0.2.0",
@@ -291,5 +388,7 @@ export const ALL_SAMPLES = {
   'OpenAI': SAMPLE_OPENAI_TRACE,
   'Custom Agent': SAMPLE_CUSTOM_TRACE,
   'Simple Array': SAMPLE_SIMPLE_ARRAY,
+  'Flight Booking (Bug)': SAMPLE_FLIGHT_BOOKING_ISSUE,
+  'Weather API (Bug)': SAMPLE_WEATHER_API_ERROR,
   'With Issues (Debug)': SAMPLE_WITH_ISSUES,
 };

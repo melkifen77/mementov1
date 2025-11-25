@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, ChevronUp, X, RefreshCw, Repeat, MessageSquareOff, ArrowRightLeft, MessageSquare, AlertCircle, Circle } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, X, RefreshCw, Repeat, MessageSquareOff, ArrowRightLeft, MessageSquare, AlertCircle, Circle, Sparkles, ShieldAlert, Ban, Activity } from 'lucide-react';
 import { useState } from 'react';
 import { TraceRun, IssueType, RiskLevel } from '@shared/models';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,9 @@ interface IssueSummaryProps {
 }
 
 const ISSUE_ICONS: Record<IssueType, typeof AlertTriangle> = {
+  guessing_after_error: Sparkles,
+  commit_after_empty: ShieldAlert,
+  unhandled_error: Ban,
   loop: Repeat,
   missing_observation: MessageSquareOff,
   suspicious_transition: ArrowRightLeft,
@@ -19,6 +22,9 @@ const ISSUE_ICONS: Record<IssueType, typeof AlertTriangle> = {
 };
 
 const ISSUE_LABELS: Record<IssueType, string> = {
+  guessing_after_error: 'Guessing After Error',
+  commit_after_empty: 'Commit After Empty',
+  unhandled_error: 'Unhandled Errors',
   loop: 'Loops',
   missing_observation: 'Missing Observations',
   suspicious_transition: 'Suspicious Transitions',
@@ -26,6 +32,18 @@ const ISSUE_LABELS: Record<IssueType, string> = {
   error_ignored: 'Errors Ignored',
   empty_result: 'Empty Results'
 };
+
+const ISSUE_PRIORITY: IssueType[] = [
+  'guessing_after_error',
+  'commit_after_empty',
+  'unhandled_error',
+  'error_ignored',
+  'loop',
+  'missing_observation',
+  'empty_result',
+  'suspicious_transition',
+  'contradiction_candidate'
+];
 
 const RISK_COLORS: Record<RiskLevel, { bg: string; text: string; border: string }> = {
   low: { bg: 'bg-green-500/10', text: 'text-green-500', border: 'border-green-500/20' },
@@ -39,11 +57,25 @@ export function IssueSummary({ trace, onClose }: IssueSummaryProps) {
   if (!trace) return null;
 
   const totalIssues = trace.issues?.length || 0;
-  const summary = trace.issueSummary || {};
+  const summary: Record<IssueType, number> = trace.issueSummary || {
+    loop: 0,
+    missing_observation: 0,
+    suspicious_transition: 0,
+    contradiction_candidate: 0,
+    error_ignored: 0,
+    empty_result: 0,
+    guessing_after_error: 0,
+    commit_after_empty: 0,
+    unhandled_error: 0
+  };
   const riskLevel = trace.riskLevel || 'low';
   const riskColors = RISK_COLORS[riskLevel];
 
-  const nonZeroIssues = Object.entries(summary).filter(([_, count]) => (count as number) > 0) as [IssueType, number][];
+  const nonZeroIssues = ISSUE_PRIORITY
+    .filter(type => (summary[type] || 0) > 0)
+    .map(type => [type, summary[type]] as [IssueType, number]);
+  
+  const stats = trace.stats;
 
   return (
     <div 
@@ -132,6 +164,31 @@ export function IssueSummary({ trace, onClose }: IssueSummaryProps) {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {stats && (
+            <div className="pt-2 border-t border-border space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-1">
+                  <Activity className="h-3 w-3" />
+                  <span>Actions:</span>
+                </div>
+                <span className="font-medium">{stats.totalActions}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  <span>Errors:</span>
+                </div>
+                <span className={`font-medium ${stats.totalErrors > 0 ? 'text-destructive' : ''}`}>
+                  {stats.totalErrors}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Total steps:</span>
+                <span className="font-medium">{stats.totalNodes}</span>
+              </div>
             </div>
           )}
 
