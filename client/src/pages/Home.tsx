@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Network, List } from 'lucide-react';
-import { TraceRun, TraceNode } from '@shared/models';
+import { TraceRun, TraceNode, FieldMapping } from '@shared/models';
 import { GenericAdapter } from '@shared/adapters/generic';
 import { UploadZone } from '@/components/UploadZone';
 import { TraceGraph } from '@/components/TraceGraph';
@@ -20,8 +20,8 @@ export default function Home() {
 
   const adapter = new GenericAdapter();
 
-  const handleUpload = (jsonData: any) => {
-    const normalized = adapter.normalize(jsonData);
+  const handleUpload = (jsonData: any, mapping?: FieldMapping) => {
+    const normalized = adapter.normalize(jsonData, mapping);
     setTrace(normalized);
     setSelectedNode(null);
   };

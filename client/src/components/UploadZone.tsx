@@ -1,17 +1,64 @@
-import { useState } from 'react';
-import { Upload, FileJson, Sparkles } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Upload, FileJson, Sparkles, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { CustomMappingDialog } from './CustomMappingDialog';
+import { ParseErrorDisplay } from './ParseErrorDisplay';
+import { FieldMapping, ParseResult } from '@shared/models';
+import { GenericAdapter } from '@shared/adapters/generic';
 
 interface UploadZoneProps {
-  onUpload: (jsonData: any) => void;
+  onUpload: (jsonData: any, mapping?: FieldMapping) => void;
+  onParseResult?: (result: ParseResult) => void;
 }
 
-export function UploadZone({ onUpload }: UploadZoneProps) {
+export function UploadZone({ onUpload, onParseResult }: UploadZoneProps) {
   const [jsonInput, setJsonInput] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+  const [parseError, setParseError] = useState<ParseResult | null>(null);
+  const [mapping, setMapping] = useState<FieldMapping>({});
+  const [showMappingDialog, setShowMappingDialog] = useState(false);
   const { toast } = useToast();
+  const adapter = useRef(new GenericAdapter());
+
+  useEffect(() => {
+    const saved = localStorage.getItem('memento_custom_mapping');
+    if (saved) {
+      try {
+        setMapping(JSON.parse(saved));
+      } catch {}
+    }
+  }, []);
+
+  const tryParse = (jsonData: any): boolean => {
+    const result = adapter.current.parse(jsonData, mapping);
+    
+    if (onParseResult) {
+      onParseResult(result);
+    }
+    
+    if (!result.success) {
+      setParseError(result);
+      return false;
+    }
+    
+    if (result.warnings && result.warnings.length > 0) {
+      toast({
+        title: 'Trace loaded with warnings',
+        description: `${result.warnings.length} warning(s) during parsing. Check the node inspector for details.`,
+      });
+    } else if (result.detectedFormat) {
+      toast({
+        title: 'Trace loaded',
+        description: `Detected format: ${result.detectedFormat}${result.arrayPath ? ` (from "${result.arrayPath}")` : ''}`,
+      });
+    }
+    
+    setParseError(null);
+    onUpload(jsonData, mapping);
+    return true;
+  };
 
   const handleVisualize = () => {
     if (!jsonInput.trim()) {
@@ -25,7 +72,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
 
     try {
       const parsed = JSON.parse(jsonInput);
-      onUpload(parsed);
+      tryParse(parsed);
     } catch (error) {
       toast({
         title: "Invalid JSON",
@@ -40,14 +87,14 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
     setIsDragging(false);
 
     const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/json') {
+    if (file && (file.type === 'application/json' || file.name.endsWith('.json'))) {
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
         setJsonInput(text);
         try {
           const parsed = JSON.parse(text);
-          onUpload(parsed);
+          tryParse(parsed);
         } catch (error) {
           toast({
             title: "Invalid JSON file",
@@ -78,6 +125,45 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
     }
   };
 
+  const handleMappingChange = (newMapping: FieldMapping) => {
+    setMapping(newMapping);
+    if (jsonInput.trim() && parseError) {
+      try {
+        const parsed = JSON.parse(jsonInput);
+        tryParse(parsed);
+      } catch {}
+    }
+  };
+
+  const handleTryAgain = () => {
+    setParseError(null);
+  };
+
+  const handleOpenCustomMapping = () => {
+    setShowMappingDialog(true);
+  };
+
+  if (parseError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[600px] px-4 py-8">
+        <div className="w-full max-w-4xl">
+          <ParseErrorDisplay 
+            result={parseError}
+            onOpenCustomMapping={handleOpenCustomMapping}
+            onTryAgain={handleTryAgain}
+          />
+          
+          <div className="mt-6 flex justify-center">
+            <CustomMappingDialog 
+              mapping={mapping} 
+              onMappingChange={handleMappingChange}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[600px] px-4 py-8">
       <div className="w-full max-w-4xl space-y-8">
@@ -89,7 +175,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
             Agent Trace Visualizer
           </h1>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            Transform raw agent logs into interactive visual reasoning maps. Support for LangChain, OpenAI, and custom formats.
+            Transform raw agent logs into interactive visual reasoning maps. Support for LangChain, LangGraph, OpenAI, and custom formats.
           </p>
         </div>
 
@@ -158,19 +244,28 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
             className="font-mono text-sm min-h-[240px] resize-y"
             data-testid="textarea-json-input"
           />
-          <Button
-            onClick={handleVisualize}
-            className="w-full"
-            size="lg"
-            data-testid="button-visualize"
-          >
-            <Sparkles className="h-4 w-4 mr-2" />
-            Visualize Trace
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleVisualize}
+              className="flex-1"
+              size="lg"
+              data-testid="button-visualize"
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              Visualize Trace
+            </Button>
+            <CustomMappingDialog 
+              mapping={mapping} 
+              onMappingChange={handleMappingChange}
+            />
+          </div>
         </div>
 
-        <div className="text-center text-sm text-muted-foreground">
+        <div className="text-center text-sm text-muted-foreground space-y-1">
           <p>Supports flexible JSON formats from any agent framework</p>
+          <p className="text-xs opacity-75">
+            LangChain, LangGraph, OpenAI, Anthropic, and custom agent traces
+          </p>
         </div>
       </div>
     </div>
