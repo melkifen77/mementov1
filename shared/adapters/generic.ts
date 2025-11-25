@@ -1,5 +1,5 @@
 import { TraceAdapter } from './index';
-import { TraceRun, TraceNode, NodeType, Step, FieldMapping, ParseResult, KNOWN_STEP_ARRAY_KEYS } from '../models';
+import { TraceRun, TraceNode, NodeType, Step, FieldMapping, ParseResult, KNOWN_STEP_ARRAY_KEYS, LangGraphDetails } from '../models';
 
 export class GenericAdapter implements TraceAdapter {
   id = 'generic';
@@ -87,6 +87,7 @@ export class GenericAdapter implements TraceAdapter {
         const content = this.extractContent(step, mapping);
         const timestamp = this.extractTimestamp(step, mapping);
         const confidence = this.extractConfidence(step);
+        const langGraphDetails = this.extractLangGraphDetails(step);
         
         if (content === '[Empty step]') {
           warnings.push(`Step ${index}: No content could be extracted`);
@@ -100,7 +101,8 @@ export class GenericAdapter implements TraceAdapter {
           confidence,
           parentId: this.extractParentId(step, index, nodeIds, mapping, toolCallIdToNodeId),
           order: step.order !== undefined ? step.order : index,
-          metadata: this.sanitizeMetadata(step)
+          metadata: this.sanitizeMetadata(step),
+          langGraphDetails: Object.keys(langGraphDetails).length > 0 ? langGraphDetails : undefined
         };
       });
 
@@ -746,6 +748,65 @@ export class GenericAdapter implements TraceAdapter {
     };
     
     return typeMap[typeStr] || 'other';
+  }
+
+  private extractLangGraphDetails(step: any): LangGraphDetails {
+    const details: LangGraphDetails = {};
+    
+    if (step.node || step.node_name) {
+      details.nodeName = step.node || step.node_name;
+    }
+    if (step.name && !details.nodeName) {
+      details.nodeName = step.name;
+    }
+    
+    if (step.state) {
+      details.stateBefore = step.state;
+    }
+    if (step.state_before) {
+      details.stateBefore = step.state_before;
+    }
+    if (step.state_after) {
+      details.stateAfter = step.state_after;
+    }
+    if (step.values) {
+      details.stateAfter = step.values;
+    }
+    
+    if (step.config) {
+      details.config = step.config;
+    }
+    if (step.configurable) {
+      details.config = step.configurable;
+    }
+    
+    if (step.run_id) {
+      details.runId = step.run_id;
+    }
+    if (step.thread_id) {
+      details.threadId = step.thread_id;
+    }
+    
+    if (step.checkpoint) {
+      details.checkpoint = step.checkpoint;
+    }
+    if (step.checkpoint_id) {
+      details.checkpoint = { id: step.checkpoint_id };
+    }
+    
+    if (step.edges && Array.isArray(step.edges)) {
+      details.edges = step.edges.map((e: any) => 
+        typeof e === 'string' ? e : (e.target || e.to || e.name || String(e))
+      );
+    }
+    if (step.next && Array.isArray(step.next)) {
+      details.edges = step.next;
+    }
+    if (typeof step.next === 'string') {
+      details.edges = [step.next];
+    }
+    
+    return details;
   }
 
   private detectSource(raw: any, detectedFormat?: string): string {

@@ -3,12 +3,14 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { Network, List } from 'lucide-react';
 import { TraceRun, TraceNode, FieldMapping } from '@shared/models';
 import { GenericAdapter } from '@shared/adapters/generic';
+import { analyzeTrace } from '@shared/analysis/trace-analyzer';
 import { UploadZone } from '@/components/UploadZone';
 import { TraceGraph } from '@/components/TraceGraph';
 import { TimelineView } from '@/components/TimelineView';
 import { NodeInspector } from '@/components/NodeInspector';
 import { ExportDialog } from '@/components/ExportDialog';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { IssueSummary } from '@/components/IssueSummary';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -16,14 +18,17 @@ export default function Home() {
   const [trace, setTrace] = useState<TraceRun | null>(null);
   const [selectedNode, setSelectedNode] = useState<TraceNode | null>(null);
   const [viewMode, setViewMode] = useState<'graph' | 'timeline'>('graph');
+  const [showIssueSummary, setShowIssueSummary] = useState(true);
   const graphRef = useRef<HTMLDivElement>(null);
 
   const adapter = new GenericAdapter();
 
   const handleUpload = (jsonData: any, mapping?: FieldMapping) => {
     const normalized = adapter.normalize(jsonData, mapping);
-    setTrace(normalized);
+    const analyzed = analyzeTrace(normalized);
+    setTrace(analyzed);
     setSelectedNode(null);
+    setShowIssueSummary(true);
   };
 
   const handleReset = () => {
@@ -98,6 +103,15 @@ export default function Home() {
             ) : (
               <TimelineView trace={trace} onNodeClick={setSelectedNode} />
             )}
+          </div>
+        )}
+
+        {trace && showIssueSummary && (
+          <div className="absolute top-4 right-4 w-72 z-30">
+            <IssueSummary 
+              trace={trace} 
+              onClose={() => setShowIssueSummary(false)}
+            />
           </div>
         )}
 

@@ -153,10 +153,143 @@ export const SAMPLE_SIMPLE_ARRAY = [
   { "type": "output", "content": "Analysis complete. Found 8 relevant records matching your criteria." }
 ];
 
+export const SAMPLE_WITH_ISSUES = {
+  "run_id": "debug-trace-001",
+  "agent_type": "faulty_agent",
+  "steps": [
+    {
+      "id": "step-1",
+      "type": "thought",
+      "content": "User wants to search for restaurants. Let me search.",
+      "timestamp": "2024-01-15T10:00:00Z"
+    },
+    {
+      "id": "step-2",
+      "type": "action",
+      "tool": "search_restaurants",
+      "tool_input": {"query": "italian restaurants nearby"},
+      "content": "Calling search_restaurants",
+      "timestamp": "2024-01-15T10:00:01Z"
+    },
+    {
+      "id": "step-3",
+      "type": "observation",
+      "content": "Error: API rate limit exceeded. No results returned.",
+      "status": "error",
+      "timestamp": "2024-01-15T10:00:02Z"
+    },
+    {
+      "id": "step-4",
+      "type": "action",
+      "tool": "search_restaurants",
+      "tool_input": {"query": "italian restaurants nearby"},
+      "content": "Calling search_restaurants again",
+      "timestamp": "2024-01-15T10:00:03Z"
+    },
+    {
+      "id": "step-5",
+      "type": "action",
+      "tool": "search_restaurants",
+      "tool_input": {"query": "italian restaurants nearby"},
+      "content": "Retrying search_restaurants",
+      "timestamp": "2024-01-15T10:00:04Z"
+    },
+    {
+      "id": "step-6",
+      "type": "action",
+      "tool": "search_restaurants",
+      "tool_input": {"query": "italian restaurants nearby"},
+      "content": "Retrying search_restaurants again",
+      "timestamp": "2024-01-15T10:00:05Z"
+    },
+    {
+      "id": "step-7",
+      "type": "observation",
+      "content": "No results found",
+      "timestamp": "2024-01-15T10:00:06Z"
+    },
+    {
+      "id": "step-8",
+      "type": "thought",
+      "content": "Found 5 great options for the user!",
+      "timestamp": "2024-01-15T10:00:07Z"
+    },
+    {
+      "id": "step-9",
+      "type": "output",
+      "content": "I found some excellent Italian restaurants for you! Here are my top picks: 1. Bella Italia 2. Pasta Paradise 3. The Roman Kitchen",
+      "timestamp": "2024-01-15T10:00:08Z"
+    }
+  ]
+};
+
+export const SAMPLE_LANGGRAPH_FULL = {
+  "run_id": "lg-full-trace-001",
+  "langgraph_version": "0.2.0",
+  "graph_id": "multi_agent_workflow",
+  "thread_id": "thread-abc123",
+  "events": [
+    {
+      "id": "node-1",
+      "node": "supervisor",
+      "type": "ai_message",
+      "content": "Received user request. Delegating to research agent.",
+      "state": {"messages": [], "next": "research"},
+      "config": {"model": "gpt-4"},
+      "timestamp": "2024-01-15T12:00:00Z"
+    },
+    {
+      "id": "node-2",
+      "node": "research",
+      "type": "tool_call",
+      "tool": "web_search",
+      "tool_input": {"query": "climate change solutions 2024"},
+      "content": "Searching for climate solutions",
+      "next": ["research"],
+      "timestamp": "2024-01-15T12:00:02Z"
+    },
+    {
+      "id": "node-3",
+      "node": "research",
+      "type": "tool_result",
+      "content": "Found 12 articles on renewable energy, carbon capture, and policy changes.",
+      "values": {"research_results": ["article1", "article2"]},
+      "timestamp": "2024-01-15T12:00:05Z"
+    },
+    {
+      "id": "node-4",
+      "node": "analyst",
+      "type": "ai_message",
+      "content": "Analyzing research results. Key themes: renewable energy adoption, policy frameworks, technology innovation.",
+      "state_after": {"analysis_complete": true},
+      "timestamp": "2024-01-15T12:00:08Z"
+    },
+    {
+      "id": "node-5",
+      "node": "writer",
+      "type": "ai_message",
+      "content": "Drafting summary based on analysis...",
+      "next": "end",
+      "timestamp": "2024-01-15T12:00:10Z"
+    },
+    {
+      "id": "node-6",
+      "node": "end",
+      "type": "final_answer",
+      "content": "Climate Change Solutions Summary:\\n\\n1. Renewable Energy: Solar and wind adoption growing 25% YoY\\n2. Carbon Capture: New technologies showing promise\\n3. Policy: Paris Agreement commitments strengthening\\n\\nThe outlook is cautiously optimistic with significant investment needed.",
+      "is_final": true,
+      "checkpoint": {"id": "ckpt-final-001"},
+      "timestamp": "2024-01-15T12:00:15Z"
+    }
+  ]
+};
+
 export const ALL_SAMPLES = {
   'LangGraph': SAMPLE_LANGGRAPH_TRACE,
+  'LangGraph (Full)': SAMPLE_LANGGRAPH_FULL,
   'LangChain': SAMPLE_LANGCHAIN_TRACE,
   'OpenAI': SAMPLE_OPENAI_TRACE,
   'Custom Agent': SAMPLE_CUSTOM_TRACE,
   'Simple Array': SAMPLE_SIMPLE_ARRAY,
+  'With Issues (Debug)': SAMPLE_WITH_ISSUES,
 };

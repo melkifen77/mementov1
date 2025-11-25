@@ -1,6 +1,6 @@
-import { X, ChevronDown, ChevronUp, Copy, Check, AlertCircle, ExternalLink, GripVertical } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Copy, Check, AlertCircle, ExternalLink, GripVertical, AlertTriangle, Lightbulb, Info, Network } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { TraceNode, TraceRun } from '@shared/models';
+import { TraceNode, TraceRun, TraceIssue, RiskLevel } from '@shared/models';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -448,6 +448,144 @@ export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeIn
                         <p className="text-xs">{metadata.error}</p>
                       )}
                     </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Risk Level (for output nodes) */}
+            {node.riskLevel && (
+              <>
+                <Separator />
+                <div className={`p-3 rounded-md border ${
+                  node.riskLevel === 'high' ? 'bg-destructive/10 border-destructive/20' :
+                  node.riskLevel === 'medium' ? 'bg-yellow-500/10 border-yellow-500/20' :
+                  'bg-green-500/10 border-green-500/20'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className={`h-4 w-4 ${
+                      node.riskLevel === 'high' ? 'text-destructive' :
+                      node.riskLevel === 'medium' ? 'text-yellow-500' :
+                      'text-green-500'
+                    }`} />
+                    <span className="text-sm font-medium">
+                      Risk: {node.riskLevel.charAt(0).toUpperCase() + node.riskLevel.slice(1)}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Issues on this node */}
+            {node.issues && node.issues.length > 0 && (
+              <>
+                <Separator />
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    Issues ({node.issues.length})
+                  </label>
+                  <div className="mt-2 space-y-2">
+                    {node.issues.map((issue) => (
+                      <div 
+                        key={issue.id}
+                        className={`p-3 rounded-md border ${
+                          issue.severity === 'error' 
+                            ? 'bg-destructive/10 border-destructive/20' 
+                            : 'bg-yellow-500/10 border-yellow-500/20'
+                        }`}
+                        data-testid={`issue-${issue.id}`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className={`h-4 w-4 mt-0.5 ${
+                            issue.severity === 'error' ? 'text-destructive' : 'text-yellow-500'
+                          }`} />
+                          <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium">{issue.title}</p>
+                            <p className="text-xs text-muted-foreground">{issue.description}</p>
+                            <div className="flex items-start gap-1 mt-2 pt-2 border-t border-border/50">
+                              <Lightbulb className="h-3 w-3 text-primary mt-0.5" />
+                              <p className="text-xs text-primary">{issue.suggestion}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* LangGraph Details */}
+            {node.langGraphDetails && Object.keys(node.langGraphDetails).length > 0 && (
+              <>
+                <Separator />
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Network className="h-3 w-3" />
+                    LangGraph Details
+                  </label>
+                  <div className="mt-2 space-y-2 bg-muted/50 p-3 rounded-md">
+                    {node.langGraphDetails.nodeName && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Node: </span>
+                        <Badge variant="outline" className="text-xs">{node.langGraphDetails.nodeName}</Badge>
+                      </div>
+                    )}
+                    {node.langGraphDetails.runId && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Run ID: </span>
+                        <span className="text-xs font-mono">{node.langGraphDetails.runId}</span>
+                      </div>
+                    )}
+                    {node.langGraphDetails.threadId && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Thread: </span>
+                        <span className="text-xs font-mono">{node.langGraphDetails.threadId}</span>
+                      </div>
+                    )}
+                    {node.langGraphDetails.edges && node.langGraphDetails.edges.length > 0 && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Next: </span>
+                        {node.langGraphDetails.edges.map((edge, i) => (
+                          <Badge key={i} variant="secondary" className="text-xs mr-1">{edge}</Badge>
+                        ))}
+                      </div>
+                    )}
+                    {node.langGraphDetails.stateBefore && (
+                      <div>
+                        <span className="text-xs text-muted-foreground block mb-1">State (before):</span>
+                        <pre className="text-xs font-mono bg-background p-2 rounded border overflow-x-auto">
+                          {JSON.stringify(node.langGraphDetails.stateBefore, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    {node.langGraphDetails.stateAfter && (
+                      <div>
+                        <span className="text-xs text-muted-foreground block mb-1">State (after):</span>
+                        <pre className="text-xs font-mono bg-background p-2 rounded border overflow-x-auto">
+                          {JSON.stringify(node.langGraphDetails.stateAfter, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    {node.langGraphDetails.config && (
+                      <div>
+                        <span className="text-xs text-muted-foreground block mb-1">Config:</span>
+                        <pre className="text-xs font-mono bg-background p-2 rounded border overflow-x-auto">
+                          {JSON.stringify(node.langGraphDetails.config, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    {node.langGraphDetails.checkpoint && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Checkpoint: </span>
+                        <span className="text-xs font-mono">
+                          {typeof node.langGraphDetails.checkpoint === 'object' 
+                            ? node.langGraphDetails.checkpoint.id || JSON.stringify(node.langGraphDetails.checkpoint)
+                            : node.langGraphDetails.checkpoint}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </>

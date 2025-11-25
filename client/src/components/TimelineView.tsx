@@ -2,7 +2,7 @@ import { TraceRun, TraceNode } from '@shared/models';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AlertCircle, TrendingDown, Clock } from 'lucide-react';
+import { AlertCircle, TrendingDown, Clock, AlertTriangle, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
 
 interface TimelineViewProps {
   trace: TraceRun;
@@ -47,6 +47,9 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                            !!node.metadata?.exception || 
                            node.metadata?.status === 'failed' ||
                            node.metadata?.status === 'error';
+            const issueCount = node.issues?.length || 0;
+            const hasIssues = issueCount > 0;
+            const riskLevel = node.riskLevel;
 
             return (
               <div key={node.id} className="flex gap-4 group">
@@ -84,6 +87,27 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                         >
                           {node.type}
                         </Badge>
+                        {hasIssues && (
+                          <Badge variant="outline" className="text-yellow-600 border-yellow-600">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            {issueCount} issue{issueCount !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                        {riskLevel && (
+                          <Badge 
+                            variant="outline" 
+                            className={
+                              riskLevel === 'high' ? 'text-destructive border-destructive' :
+                              riskLevel === 'medium' ? 'text-yellow-600 border-yellow-600' :
+                              'text-green-600 border-green-600'
+                            }
+                          >
+                            {riskLevel === 'high' ? <ShieldAlert className="h-3 w-3 mr-1" /> :
+                             riskLevel === 'medium' ? <ShieldQuestion className="h-3 w-3 mr-1" /> :
+                             <ShieldCheck className="h-3 w-3 mr-1" />}
+                            Risk: {riskLevel}
+                          </Badge>
+                        )}
                         {hasLowConfidence && (
                           <Badge variant="outline" className="text-yellow-600 border-yellow-600">
                             <TrendingDown className="h-3 w-3 mr-1" />

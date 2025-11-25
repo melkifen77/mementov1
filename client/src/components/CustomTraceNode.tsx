@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { TraceNode } from '@shared/models';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, TrendingDown } from 'lucide-react';
+import { AlertCircle, TrendingDown, AlertTriangle, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
 
 interface CustomTraceNodeProps {
   data: TraceNode & { onNodeClick?: (node: TraceNode) => void };
@@ -48,6 +48,9 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
                    !!data.metadata?.exception || 
                    data.metadata?.status === 'failed' ||
                    data.metadata?.status === 'error';
+  const issueCount = data.issues?.length || 0;
+  const hasIssues = issueCount > 0;
+  const riskLevel = data.riskLevel;
 
   return (
     <div
@@ -74,13 +77,30 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
             {data.type}
           </Badge>
           <div className="flex items-center gap-1">
+            {hasIssues && (
+              <div className="flex items-center gap-0.5 text-yellow-600" title={`${issueCount} issue${issueCount !== 1 ? 's' : ''}`}>
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span className="text-xs font-medium">{issueCount}</span>
+              </div>
+            )}
+            {riskLevel && (
+              <div className={`flex items-center gap-0.5 ${
+                riskLevel === 'high' ? 'text-destructive' :
+                riskLevel === 'medium' ? 'text-yellow-600' :
+                'text-green-600'
+              }`} title={`Risk: ${riskLevel}`}>
+                {riskLevel === 'high' ? <ShieldAlert className="h-3.5 w-3.5" /> :
+                 riskLevel === 'medium' ? <ShieldQuestion className="h-3.5 w-3.5" /> :
+                 <ShieldCheck className="h-3.5 w-3.5" />}
+              </div>
+            )}
             {hasLowConfidence && (
-              <div className="flex items-center gap-0.5 text-yellow-600">
+              <div className="flex items-center gap-0.5 text-yellow-600" title="Low confidence">
                 <TrendingDown className="h-3.5 w-3.5" />
               </div>
             )}
             {hasError && (
-              <div className="flex items-center gap-0.5 text-destructive">
+              <div className="flex items-center gap-0.5 text-destructive" title="Error detected">
                 <AlertCircle className="h-3.5 w-3.5" />
               </div>
             )}
