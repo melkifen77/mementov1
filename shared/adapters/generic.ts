@@ -1,188 +1,470 @@
 import { TraceAdapter } from './index';
-import { TraceRun, TraceNode, NodeType } from '../models';
+import { TraceRun, TraceNode, NodeType, Step, FieldMapping, ParseResult, KNOWN_STEP_ARRAY_KEYS } from '../models';
 
 export class GenericAdapter implements TraceAdapter {
   id = 'generic';
   label = 'Generic JSON';
 
-  normalize(raw: any): TraceRun {
-    let steps: any[] = [];
+  normalize(raw: any, mapping?: FieldMapping): TraceRun {
+    const result = this.parse(raw, mapping);
     
-    if (typeof raw === 'string') {
-      steps = [{ type: 'other', content: raw }];
-    } else if (Array.isArray(raw)) {
-      steps = raw.flatMap((item, idx) => this.normalizeStep(item, idx));
-    } else if (raw && Array.isArray(raw.steps)) {
-      steps = raw.steps.flatMap((item: any, idx: number) => this.normalizeStep(item, idx));
-    } else if (raw && Array.isArray(raw.trace)) {
-      steps = raw.trace.flatMap((item: any, idx: number) => this.normalizeStep(item, idx));
-    } else if (raw && Array.isArray(raw.nodes)) {
-      steps = raw.nodes.flatMap((item: any, idx: number) => this.normalizeStep(item, idx));
-    } else if (raw && Array.isArray(raw.messages)) {
-      steps = raw.messages.flatMap((item: any, idx: number) => this.normalizeStep(item, idx));
-    } else if (raw && Array.isArray(raw.intermediate_steps)) {
-      steps = raw.intermediate_steps.flatMap((item: any, idx: number) => this.normalizeStep(item, idx));
-    } else if (raw && Array.isArray(raw.tool_calls)) {
-      steps = raw.tool_calls.flatMap((item: any, idx: number) => this.normalizeStep(item, idx));
-    } else if (raw && typeof raw === 'object') {
-      const possibleArrays = Object.values(raw).filter(Array.isArray);
-      if (possibleArrays.length > 0) {
-        steps = (possibleArrays[0] as any[]).flatMap((item: any, idx: number) => this.normalizeStep(item, idx));
-      } else {
-        steps = this.normalizeStep(raw, 0);
-      }
-    }
-
-    const nodeIds = steps.map((step, index) => this.extractId(step, index));
-    
-    const nodes: TraceNode[] = steps.map((step, index) => {
-      const type = this.detectType(step);
-      const content = this.extractContent(step);
-      const confidence = this.extractConfidence(step);
-      
+    if (!result.success || !result.trace) {
       return {
-        id: nodeIds[index],
-        type,
-        content,
-        timestamp: this.extractTimestamp(step),
-        confidence,
-        parentId: this.extractParentId(step, index, nodeIds),
-        order: step.order !== undefined ? step.order : index,
-        metadata: this.sanitizeMetadata(step)
+        id: `run-${this.generateId()}`,
+        source: 'generic',
+        nodes: [{
+          id: 'error-node',
+          type: 'system',
+          content: result.error || 'Failed to parse trace',
+          order: 0,
+          parentId: null,
+          metadata: { error: true, warnings: result.warnings }
+        }]
       };
-    });
-
-    return {
-      id: raw.id || raw.run_id || raw.trace_id || `run-${this.generateId()}`,
-      source: raw.source || raw.provider || 'generic',
-      nodes
-    };
+    }
+    
+    return result.trace;
   }
 
-  private normalizeStep(step: any, index: number): any[] {
-    if (typeof step === 'string') {
-      return [{ type: 'other', content: step }];
-    }
+  parse(raw: any, mapping?: FieldMapping): ParseResult {
+    const warnings: string[] = [];
     
-    if (typeof step !== 'object' || step === null) {
-      return [{ type: 'other', content: String(step) }];
-    }
+    try {
+      if (raw === null || raw === undefined) {
+        return {
+          success: false,
+          error: 'Input is null or undefined. Please provide valid JSON data.',
+          warnings
+        };
+      }
 
-    const nestedNodes: any[] = [];
-    const knownKeys = ['thought', 'action', 'observation', 'output', 'final_answer', 'result'];
-    
-    for (const key of knownKeys) {
-      if (step[key] !== undefined) {
-        const value = step[key];
-        const nodeData: any = { originalKey: key };
+      if (typeof raw === 'string') {
+        try {
+          raw = JSON.parse(raw);
+        } catch {
+          return {
+            success: false,
+            error: 'Input is a string but not valid JSON. Please check the syntax.',
+            warnings
+          };
+        }
+      }
+
+      const { steps: rawSteps, arrayPath, detectedFormat } = this.findStepArray(raw, mapping?.stepsPath);
+      
+      if (!rawSteps || rawSteps.length === 0) {
+        const searchedKeys = KNOWN_STEP_ARRAY_KEYS.join(', ');
+        const availableKeys = typeof raw === 'object' && raw !== null 
+          ? Object.keys(raw).join(', ') 
+          : 'none';
         
-        if (typeof value === 'object' && value !== null) {
-          nodeData.tool = value.tool || value.name || value.function;
-          nodeData.content = value.tool_input || value.input || value.text || value.content || JSON.stringify(value, null, 2);
-          
-          if (value.tool || value.name) {
-            nodeData.label = value.tool || value.name;
-          }
-        } else {
-          nodeData.content = String(value);
+        return {
+          success: false,
+          error: `Could not find an array of steps in the JSON.\n\nSearched for: root array, or keys: ${searchedKeys}\n\nAvailable keys: ${availableKeys}\n\nTip: Use Custom Mapping to specify where your steps are located.`,
+          warnings,
+          detectedFormat
+        };
+      }
+
+      const expandedSteps = this.expandSteps(rawSteps, mapping);
+      
+      if (expandedSteps.length === 0) {
+        return {
+          success: false,
+          error: 'Found array but it contains no processable steps.',
+          warnings,
+          arrayPath,
+          detectedFormat
+        };
+      }
+
+      const nodeIds = expandedSteps.map((step, index) => this.extractId(step, index, mapping));
+      
+      const nodes: TraceNode[] = expandedSteps.map((step, index) => {
+        const type = this.detectType(step, mapping);
+        const content = this.extractContent(step, mapping);
+        const timestamp = this.extractTimestamp(step, mapping);
+        const confidence = this.extractConfidence(step);
+        
+        if (content === '[Empty step]') {
+          warnings.push(`Step ${index}: No content could be extracted`);
         }
         
-        if (step.id) nodeData.id = `${step.id}-${key}`;
-        if (step.timestamp) nodeData.timestamp = step.timestamp;
-        if (step.confidence) nodeData.confidence = step.confidence;
-        
-        nestedNodes.push(nodeData);
+        return {
+          id: nodeIds[index],
+          type,
+          content,
+          timestamp,
+          confidence,
+          parentId: this.extractParentId(step, index, nodeIds, mapping),
+          order: step.order !== undefined ? step.order : index,
+          metadata: this.sanitizeMetadata(step)
+        };
+      });
+
+      const steps: Step[] = nodes.map((node, index) => ({
+        id: node.id,
+        parent_id: node.parentId,
+        type: node.type,
+        content: node.content,
+        timestamp: node.timestamp ? new Date(node.timestamp).toISOString() : undefined,
+        raw: expandedSteps[index]
+      }));
+
+      const trace: TraceRun = {
+        id: raw.id || raw.run_id || raw.trace_id || raw.session_id || `run-${this.generateId()}`,
+        source: this.detectSource(raw, detectedFormat),
+        nodes
+      };
+
+      return {
+        success: true,
+        trace,
+        steps,
+        warnings: warnings.length > 0 ? warnings : undefined,
+        detectedFormat,
+        arrayPath
+      };
+      
+    } catch (error) {
+      return {
+        success: false,
+        error: `Unexpected error during parsing: ${error instanceof Error ? error.message : String(error)}`,
+        warnings
+      };
+    }
+  }
+
+  private findStepArray(raw: any, customPath?: string): { 
+    steps: any[] | null; 
+    arrayPath?: string;
+    detectedFormat?: string;
+  } {
+    if (customPath) {
+      const customSteps = this.getNestedValue(raw, customPath);
+      if (Array.isArray(customSteps)) {
+        return { steps: customSteps, arrayPath: customPath, detectedFormat: 'custom' };
       }
     }
 
-    if (nestedNodes.length > 0) {
-      return nestedNodes;
+    if (Array.isArray(raw)) {
+      return { steps: raw, arrayPath: 'root', detectedFormat: 'array' };
     }
 
-    return [step];
+    if (typeof raw !== 'object' || raw === null) {
+      return { steps: null };
+    }
+
+    for (const key of KNOWN_STEP_ARRAY_KEYS) {
+      if (Array.isArray(raw[key]) && raw[key].length > 0) {
+        let format = 'generic';
+        if (key === 'intermediate_steps') format = 'langchain';
+        if (key === 'events' || key === 'messages') format = 'langgraph';
+        if (key === 'tool_calls') format = 'openai';
+        
+        return { steps: raw[key], arrayPath: key, detectedFormat: format };
+      }
+    }
+
+    for (const key of Object.keys(raw)) {
+      if (key.toLowerCase().includes('step') || 
+          key.toLowerCase().includes('trace') ||
+          key.toLowerCase().includes('event') ||
+          key.toLowerCase().includes('message')) {
+        if (Array.isArray(raw[key]) && raw[key].length > 0) {
+          return { steps: raw[key], arrayPath: key, detectedFormat: 'detected' };
+        }
+      }
+    }
+
+    for (const key of KNOWN_STEP_ARRAY_KEYS) {
+      for (const outerKey of Object.keys(raw)) {
+        const nested = raw[outerKey];
+        if (nested && typeof nested === 'object' && Array.isArray(nested[key])) {
+          return { 
+            steps: nested[key], 
+            arrayPath: `${outerKey}.${key}`, 
+            detectedFormat: 'nested' 
+          };
+        }
+      }
+    }
+
+    const allArrays = this.findAllArrays(raw, '', 3);
+    if (allArrays.length > 0) {
+      const sorted = allArrays.sort((a, b) => b.items.length - a.items.length);
+      const best = sorted[0];
+      if (best.items.length > 0 && typeof best.items[0] === 'object') {
+        return { steps: best.items, arrayPath: best.path, detectedFormat: 'fallback' };
+      }
+    }
+
+    return { steps: null };
+  }
+
+  private findAllArrays(obj: any, path: string, maxDepth: number): { path: string; items: any[] }[] {
+    if (maxDepth <= 0) return [];
+    
+    const results: { path: string; items: any[] }[] = [];
+    
+    if (typeof obj !== 'object' || obj === null) return results;
+    
+    for (const key of Object.keys(obj)) {
+      const value = obj[key];
+      const currentPath = path ? `${path}.${key}` : key;
+      
+      if (Array.isArray(value)) {
+        results.push({ path: currentPath, items: value });
+      } else if (typeof value === 'object' && value !== null) {
+        results.push(...this.findAllArrays(value, currentPath, maxDepth - 1));
+      }
+    }
+    
+    return results;
+  }
+
+  private getNestedValue(obj: any, path: string): any {
+    const parts = path.split('.');
+    let current = obj;
+    
+    for (const part of parts) {
+      if (current === null || current === undefined) return undefined;
+      
+      if (part.includes('[')) {
+        const match = part.match(/^(\w+)\[(\d+)\]$/);
+        if (match) {
+          current = current[match[1]]?.[parseInt(match[2])];
+        } else {
+          current = current[part];
+        }
+      } else {
+        current = current[part];
+      }
+    }
+    
+    return current;
+  }
+
+  private expandSteps(steps: any[], mapping?: FieldMapping): any[] {
+    const expanded: any[] = [];
+    
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      
+      if (typeof step === 'string') {
+        expanded.push({ content: step, _originalIndex: i });
+        continue;
+      }
+      
+      if (typeof step !== 'object' || step === null) {
+        expanded.push({ content: String(step), _originalIndex: i });
+        continue;
+      }
+
+      if (Array.isArray(step) && step.length === 2) {
+        const [first, second] = step;
+        
+        if (typeof first === 'object' && first !== null && 
+            (first.tool || first.action || first.name)) {
+          expanded.push({
+            ...first,
+            type: 'action',
+            _originalIndex: i,
+            _tupleIndex: 0
+          });
+          
+          const obsContent = typeof second === 'string' ? second : JSON.stringify(second, null, 2);
+          expanded.push({
+            content: obsContent,
+            type: 'observation',
+            _originalIndex: i,
+            _tupleIndex: 1
+          });
+          continue;
+        }
+      }
+
+      const subSteps = this.extractSubSteps(step, i);
+      if (subSteps.length > 0) {
+        expanded.push(...subSteps);
+      } else {
+        expanded.push({ ...step, _originalIndex: i });
+      }
+    }
+    
+    return expanded;
+  }
+
+  private extractSubSteps(step: any, originalIndex: number): any[] {
+    const subSteps: any[] = [];
+    const knownSubKeys = ['thought', 'action', 'observation', 'output', 'final_answer', 'result', 'tool_call', 'tool_result'];
+    
+    let hasSubKeys = false;
+    for (const key of knownSubKeys) {
+      if (step[key] !== undefined) {
+        hasSubKeys = true;
+        const value = step[key];
+        const subStep: any = { 
+          _originalKey: key,
+          _originalIndex: originalIndex 
+        };
+        
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          Object.assign(subStep, value);
+          if (!subStep.content) {
+            subStep.content = value.tool_input || value.input || value.text || value.content;
+          }
+        } else {
+          subStep.content = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+        }
+        
+        if (step.id) subStep._parentStepId = step.id;
+        if (step.timestamp) subStep.timestamp = step.timestamp;
+        
+        subSteps.push(subStep);
+      }
+    }
+    
+    return hasSubKeys ? subSteps : [];
   }
 
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  private extractId(step: any, index: number): string {
-    return step.id || 
-           step.step_id || 
-           step.nodeId || 
-           step.node_id ||
-           step.uuid ||
-           `step-${this.generateId()}-${index}`;
-  }
-
-  private extractContent(step: any): string {
-    let content = step.content || 
-                  step.text || 
-                  step.message || 
-                  step.output || 
-                  step.input ||
-                  step.data ||
-                  step.value ||
-                  step.result;
-
-    if (step.label && step.tool) {
-      const toolInput = step.content || step.input || step.tool_input;
-      if (toolInput) {
-        if (typeof toolInput === 'object') {
-          return `${step.label}\n${JSON.stringify(toolInput, null, 2)}`;
-        }
-        return `${step.label}: ${toolInput}`;
-      }
-      return step.label;
+  private extractId(step: any, index: number, mapping?: FieldMapping): string {
+    if (mapping?.idField) {
+      const customId = this.getNestedValue(step, mapping.idField);
+      if (customId !== undefined && customId !== null) return String(customId);
     }
-
-    if (typeof content === 'object' && content !== null) {
-      if (Array.isArray(content) && content.length < 5) {
-        return JSON.stringify(content);
-      }
-      return JSON.stringify(content, null, 2);
-    }
-
-    if (content === undefined || content === null) {
-      const stepCopy = { ...step };
-      delete stepCopy.type;
-      delete stepCopy.id;
-      delete stepCopy.timestamp;
-      delete stepCopy.metadata;
-      delete stepCopy.originalKey;
-      delete stepCopy.tool;
-      delete stepCopy.label;
-      delete stepCopy.order;
-      delete stepCopy.parentId;
-      delete stepCopy.parent_id;
-      
-      if (Object.keys(stepCopy).length > 0) {
-        const keys = Object.keys(stepCopy);
-        if (keys.length === 1) {
-          const singleValue = stepCopy[keys[0]];
-          if (typeof singleValue !== 'object') {
-            return String(singleValue);
-          }
-        }
-        return JSON.stringify(stepCopy, null, 2);
-      } else {
-        content = '[Empty step]';
-      }
-    }
-
-    return String(content);
-  }
-
-  private extractTimestamp(step: any): number | undefined {
-    const ts = step.timestamp || 
-               step.time || 
-               step.created_at || 
-               step.createdAt ||
-               step.start_time;
     
+    const idFields = ['id', 'step_id', 'node_id', 'nodeId', 'uuid', 'event_id', 'eventId', 'message_id', 'run_id'];
+    
+    for (const field of idFields) {
+      if (step[field] !== undefined && step[field] !== null) {
+        const baseId = String(step[field]);
+        if (step._tupleIndex !== undefined) {
+          return `${baseId}-${step._tupleIndex}`;
+        }
+        if (step._originalKey) {
+          return `${baseId}-${step._originalKey}`;
+        }
+        return baseId;
+      }
+    }
+    
+    const suffix = step._tupleIndex !== undefined ? `-${step._tupleIndex}` : 
+                   step._originalKey ? `-${step._originalKey}` : '';
+    
+    return `step-${index}${suffix}`;
+  }
+
+  private extractContent(step: any, mapping?: FieldMapping): string {
+    if (mapping?.contentField) {
+      const customContent = this.getNestedValue(step, mapping.contentField);
+      if (customContent !== undefined && customContent !== null) {
+        return this.formatContent(customContent);
+      }
+    }
+
+    const contentFields = [
+      'content', 'text', 'message', 'prompt', 
+      'tool_input', 'input', 'args', 'arguments',
+      'observation', 'result', 'response', 'output',
+      'tool_output', 'return_value', 'data', 'value',
+      'answer', 'final_answer', 'completion'
+    ];
+    
+    for (const field of contentFields) {
+      if (step[field] !== undefined && step[field] !== null && step[field] !== '') {
+        const value = step[field];
+        
+        if (step.tool || step.name || step.function || step.tool_name) {
+          const toolName = step.tool || step.name || step.function || step.tool_name;
+          return `${toolName}\n${this.formatContent(value)}`;
+        }
+        
+        return this.formatContent(value);
+      }
+    }
+
+    if (step.tool || step.name || step.function || step.tool_name) {
+      const toolName = step.tool || step.name || step.function || step.tool_name;
+      const args = step.tool_input || step.input || step.args || step.arguments;
+      if (args) {
+        return `${toolName}\n${this.formatContent(args)}`;
+      }
+      return toolName;
+    }
+
+    const stepCopy = { ...step };
+    const metaKeys = ['type', 'id', 'timestamp', 'metadata', '_originalKey', '_originalIndex', 
+                      '_tupleIndex', '_parentStepId', 'order', 'parentId', 'parent_id', 'parent',
+                      'tool', 'name', 'function', 'tool_name', 'role', 'source'];
+    
+    for (const key of metaKeys) {
+      delete stepCopy[key];
+    }
+    
+    if (Object.keys(stepCopy).length > 0) {
+      if (Object.keys(stepCopy).length === 1) {
+        const singleValue = Object.values(stepCopy)[0];
+        if (typeof singleValue !== 'object' || singleValue === null) {
+          return String(singleValue);
+        }
+      }
+      return JSON.stringify(stepCopy, null, 2);
+    }
+    
+    return '[Empty step]';
+  }
+
+  private formatContent(value: any): string {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    
+    try {
+      if (Array.isArray(value)) {
+        if (value.length === 0) return '[]';
+        if (value.every(item => typeof item === 'string')) {
+          return value.join('\n');
+        }
+      }
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  private extractTimestamp(step: any, mapping?: FieldMapping): number | undefined {
+    if (mapping?.timestampField) {
+      const customTs = this.getNestedValue(step, mapping.timestampField);
+      if (customTs !== undefined) return this.parseTimestamp(customTs);
+    }
+    
+    const tsFields = ['timestamp', 'time', 'created_at', 'createdAt', 'start_time', 'startTime', 
+                      'datetime', 'date', 'ts', 'event_time', 'logged_at'];
+    
+    for (const field of tsFields) {
+      if (step[field] !== undefined && step[field] !== null) {
+        const parsed = this.parseTimestamp(step[field]);
+        if (parsed !== undefined) return parsed;
+      }
+    }
+    
+    return undefined;
+  }
+
+  private parseTimestamp(ts: any): number | undefined {
     if (ts === undefined || ts === null) return undefined;
     
-    if (typeof ts === 'number') return ts;
+    if (typeof ts === 'number') {
+      if (ts > 1e12) return ts;
+      if (ts > 1e9) return ts * 1000;
+      return undefined;
+    }
+    
     if (typeof ts === 'string') {
       const parsed = new Date(ts).getTime();
       return isNaN(parsed) ? undefined : parsed;
@@ -192,78 +474,216 @@ export class GenericAdapter implements TraceAdapter {
   }
 
   private extractConfidence(step: any): number | undefined {
-    const conf = step.confidence || 
-                 step.score || 
-                 step.probability ||
-                 step.certainty;
+    const confFields = ['confidence', 'score', 'probability', 'certainty', 'weight'];
     
-    if (conf === undefined || conf === null) return undefined;
+    for (const field of confFields) {
+      if (step[field] !== undefined && step[field] !== null) {
+        const num = Number(step[field]);
+        if (!isNaN(num)) {
+          return num > 1 ? num / 100 : num;
+        }
+      }
+    }
     
-    const num = Number(conf);
-    if (isNaN(num)) return undefined;
-    
-    if (num > 1) return num / 100;
-    return num;
+    return undefined;
   }
 
-  private extractParentId(step: any, index: number, nodeIds: string[]): string | null {
-    const explicitParent = step.parentId || 
-                          step.parent_id || 
-                          step.parent ||
-                          step.parentNodeId;
+  private extractParentId(step: any, index: number, nodeIds: string[], mapping?: FieldMapping): string | null {
+    if (mapping?.parentIdField) {
+      const customParent = this.getNestedValue(step, mapping.parentIdField);
+      if (customParent !== undefined && customParent !== null) return String(customParent);
+    }
     
-    if (explicitParent) return String(explicitParent);
+    const parentFields = ['parentId', 'parent_id', 'parent', 'parentNodeId', 'source', 'from', 'prev'];
+    
+    for (const field of parentFields) {
+      if (step[field] !== undefined && step[field] !== null) {
+        return String(step[field]);
+      }
+    }
+
+    if (step.edges && Array.isArray(step.edges)) {
+      const incomingEdge = step.edges.find((e: any) => e.target === step.id || e.to === step.id);
+      if (incomingEdge) {
+        return incomingEdge.source || incomingEdge.from;
+      }
+    }
     
     if (index === 0) return null;
-    
     return nodeIds[index - 1] || null;
   }
 
-  private detectType(step: any): NodeType {
-    if (step.originalKey) {
-      const key = step.originalKey.toLowerCase();
-      if (key === 'thought') return 'thought';
-      if (key === 'action') return 'action';
-      if (key === 'observation' || key === 'result') return 'observation';
-      if (key === 'output' || key === 'final_answer') return 'output';
+  private detectType(step: any, mapping?: FieldMapping): NodeType {
+    if (mapping?.typeField) {
+      const customType = this.getNestedValue(step, mapping.typeField);
+      if (customType) {
+        const normalized = this.normalizeType(String(customType).toLowerCase());
+        if (normalized !== 'other') return normalized;
+      }
     }
 
-    if (step.tool || step.function || step.name) {
+    if (step._originalKey) {
+      const key = step._originalKey.toLowerCase();
+      if (key === 'thought' || key === 'thinking' || key === 'reasoning') return 'thought';
+      if (key === 'action' || key === 'tool_call') return 'action';
+      if (key === 'observation' || key === 'result' || key === 'tool_result') return 'observation';
+      if (key === 'output' || key === 'final_answer' || key === 'answer') return 'output';
+    }
+
+    if (step.type !== undefined) {
+      const normalized = this.normalizeType(String(step.type).toLowerCase());
+      if (normalized !== 'other') return normalized;
+    }
+
+    if (step.tool || step.tool_name || step.function_call || step.function || 
+        step.action || step.tool_input || step.tool_calls) {
       return 'action';
     }
 
-    if (step.result !== undefined && !step.type) {
+    if (step.observation !== undefined || step.result !== undefined || 
+        step.response !== undefined || step.tool_output !== undefined ||
+        step.return_value !== undefined) {
       return 'observation';
     }
 
-    const rawType = step.type || step.kind || step.nodeType || '';
-    const typeStr = String(rawType).toLowerCase();
-    
-    const content = String(step.content || step.text || step.message || '').toLowerCase();
-    const combined = `${typeStr} ${content}`;
-    
-    if (combined.match(/\b(thought|thinking|reason|consider|analyze|plan)\b/i)) {
-      return 'thought';
-    }
-    if (combined.match(/\b(action|tool|call|execute|run|fetch|search|query)\b/i)) {
-      return 'action';
-    }
-    if (combined.match(/\b(observation|result|response|returned|found)\b/i)) {
-      return 'observation';
-    }
-    if (combined.match(/\b(final|answer|recommendation|conclusion|output)\b/i)) {
+    if (step.final_answer !== undefined || step.answer !== undefined || 
+        step.completion !== undefined || step.output_text !== undefined ||
+        step.is_final === true || step.finished === true) {
       return 'output';
     }
-    if (combined.match(/\b(system|internal|log|debug)\b/i)) {
+
+    if (step.role === 'assistant') {
+      const content = String(step.content || step.text || step.message || '').toLowerCase();
+      
+      if (content.match(/\b(plan|planning|checking|analyzing|considering|thinking|let me|i will|i'll|first|next|then)\b/i)) {
+        return 'thought';
+      }
+      
+      if (step.tool_calls || step.function_call) {
+        return 'action';
+      }
+    }
+
+    if (step.role === 'tool' || step.role === 'function') {
+      return 'observation';
+    }
+
+    if (step.role === 'system') {
       return 'system';
+    }
+
+    const typeFields = ['kind', 'nodeType', 'node_type', 'step_type', 'event_type', 'category'];
+    for (const field of typeFields) {
+      if (step[field]) {
+        const normalized = this.normalizeType(String(step[field]).toLowerCase());
+        if (normalized !== 'other') return normalized;
+      }
+    }
+
+    const content = String(step.content || step.text || step.message || '').toLowerCase();
+    
+    if (content.match(/\b(error|failed|exception|traceback)\b/i)) {
+      return 'system';
+    }
+    
+    if (content.match(/\b(calling|executing|running|invoking|fetching|searching|querying)\s+\w+/i)) {
+      return 'action';
+    }
+    
+    if (content.match(/\b(returned|received|got|found|result|response)\s*:/i)) {
+      return 'observation';
+    }
+    
+    if (content.match(/\b(final\s+answer|in\s+conclusion|therefore|the\s+answer\s+is)\b/i)) {
+      return 'output';
     }
     
     return 'other';
   }
 
+  private normalizeType(typeStr: string): NodeType {
+    const typeMap: Record<string, NodeType> = {
+      'thought': 'thought',
+      'thinking': 'thought',
+      'reasoning': 'thought',
+      'plan': 'thought',
+      'planning': 'thought',
+      'chain_of_thought': 'thought',
+      'cot': 'thought',
+      
+      'action': 'action',
+      'tool': 'action',
+      'tool_call': 'action',
+      'function': 'action',
+      'function_call': 'action',
+      'execute': 'action',
+      'call': 'action',
+      'invoke': 'action',
+      
+      'observation': 'observation',
+      'result': 'observation',
+      'response': 'observation',
+      'tool_result': 'observation',
+      'function_result': 'observation',
+      'return': 'observation',
+      'output': 'observation',
+      
+      'final': 'output',
+      'final_answer': 'output',
+      'answer': 'output',
+      'completion': 'output',
+      'finish': 'output',
+      'done': 'output',
+      'end': 'output',
+      
+      'system': 'system',
+      'log': 'system',
+      'debug': 'system',
+      'internal': 'system',
+      'error': 'system',
+      'warning': 'system',
+      
+      'ai_message': 'thought',
+      'human_message': 'other',
+      'ai': 'thought',
+      'human': 'other',
+      'user': 'other',
+      'assistant': 'thought'
+    };
+    
+    return typeMap[typeStr] || 'other';
+  }
+
+  private detectSource(raw: any, detectedFormat?: string): string {
+    if (raw.source) return raw.source;
+    if (raw.provider) return raw.provider;
+    if (raw.framework) return raw.framework;
+    if (raw.agent_type) return raw.agent_type;
+    
+    if (raw.langgraph_version || raw.graph_id || detectedFormat === 'langgraph') {
+      return 'langgraph';
+    }
+    if (raw.langchain_version || raw.lc_id || detectedFormat === 'langchain') {
+      return 'langchain';
+    }
+    if (raw.model?.startsWith('gpt') || raw.choices || detectedFormat === 'openai') {
+      return 'openai';
+    }
+    if (raw.model?.startsWith('claude') || raw.anthropic_version) {
+      return 'anthropic';
+    }
+    
+    return detectedFormat || 'generic';
+  }
+
   private sanitizeMetadata(step: any): any {
     try {
-      return JSON.parse(JSON.stringify(step));
+      const sanitized = { ...step };
+      delete sanitized._originalIndex;
+      delete sanitized._tupleIndex;
+      delete sanitized._originalKey;
+      delete sanitized._parentStepId;
+      return JSON.parse(JSON.stringify(sanitized));
     } catch {
       return {};
     }

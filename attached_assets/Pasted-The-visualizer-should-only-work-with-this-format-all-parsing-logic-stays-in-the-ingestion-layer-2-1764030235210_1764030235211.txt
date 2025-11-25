@@ -1,0 +1,43 @@
+The visualizer should only work with this format; all parsing logic stays in the ingestion layer.
+
+2. Step array detection
+	•	Auto-detect the array of steps by checking:
+	•	root is an array → use it
+	•	or keys like: steps, trace, events, messages, nodes, intermediate_steps.
+	•	Take the first matching array found.
+
+3. Field mapping heuristics
+For each step object, derive:
+	•	id: use id → step_id → node_id → uuid → index fallback ("step_0", "step_1", …).
+	•	parent_id: use parent_id / parent / source / edge links if present; otherwise chain sequentially.
+	•	type: detect using field names & context:
+	•	If it has tool, tool_name, function_call, action, tool_input → "action".
+	•	If it has observation, result, response, tool_output → "observation".
+	•	If it has “final” / final_answer / answer / completion / output_text → "output".
+	•	If role === "assistant" and content looks like a plan/chain-of-thought (contains words like “plan”, “checking”, etc.) → "thought".
+	•	Else → "other".
+	•	content: choose the first available from:
+	•	content, text, message, prompt, tool_input, observation, result, response.
+	•	If the chosen field is an object, stringify it nicely (pretty JSON).
+	•	raw: store the original step object.
+
+4. LangGraph & LangChain compatibility
+	•	Please explicitly test with at least:
+	•	A typical LangGraph run trace (messages / events with tool calls and state transitions).
+	•	A LangChain intermediate_steps style trace (thought/action/observation sequence).
+	•	Make sure these render as a clean linear graph with correct colors & types.
+
+5. Custom mapping mode
+	•	Add an “Advanced → Custom Mapping” option:
+	•	User can specify where steps live (e.g. trace.events).
+	•	And map fields: id, parent_id, type, content, timestamp using simple selectors.
+	•	Save this mapping per user / per project so power users don’t have to adapt their JSON.
+
+6. Graceful errors
+	•	If no array of steps can be found, show a friendly error listing the keys we looked for.
+	•	If we can’t confidently categorize the type, just mark as "other" instead of breaking the graph.
+	•	Never crash the UI because of unexpected fields.
+
+With this in place I’ll be confident letting real users paste their own traces (LangGraph & others) and know that:
+	•	Most traces will “just work,”
+	•	The rest will either be fixable via Custom Mapping or show a clear error instead of blowing up.
