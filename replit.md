@@ -12,8 +12,24 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Improvements (November 2025)
 
+### Robust JSON Ingestion Layer (Latest)
+- **Canonical Step Format**: Unified internal model with id, parent_id, type, content, timestamp, raw fields
+- **Smart Array Detection**: Searches root, known keys (steps, trace, events, messages, nodes, intermediate_steps, tool_calls), nested paths, and fallback to any array
+- **Field Mapping Heuristics**:
+  - Type detection via explicit type field, role (tool/function/system), originalKey, tool/action presence, keywords
+  - Content extraction from prioritized field list with tool name prefixing
+  - Parent linking via explicit fields, tool_call_id mapping, or sequential fallback
+- **Framework Compatibility**:
+  - LangChain intermediate_steps: Properly expands [action, observation] tuples with unique IDs
+  - LangGraph events: Message-based parsing with role detection
+  - OpenAI tool_calls: Maps tool_call_id to originating assistant message
+  - Custom formats: Flexible field detection and fallback strategies
+- **Custom Mapping UI**: Power users can specify stepsPath, idField, typeField, contentField, timestampField (saved to localStorage)
+- **Graceful Errors**: Clear messages listing searched keys, available keys, and tips for custom mapping
+- **Sample Traces**: Built-in LangGraph, LangChain, OpenAI, Custom, and Simple Array samples for testing
+
 ### UI/UX Polish
-- **UploadZone**: Enhanced with animated gradient title, sparkles icon, improved drag-over states (border/shadow changes only - no layout shifts), better error handling
+- **UploadZone**: Enhanced with animated gradient title, sparkles icon, improved drag-over states (border/shadow changes only - no layout shifts), sample traces dropdown, custom mapping integration
 - **CustomTraceNode**: Improved shadows (sm to md/lg), subtle hover effects, enhanced error detection matching NodeInspector logic
 - **TimelineView**: Added Clock icon, improved spacing (gap-6), better badge styling, background for content sections, max-width container
 - **TraceGraph**: Added BackgroundVariant.Dots, polished Controls positioning, improved MiniMap styling, better edge colors
@@ -23,6 +39,7 @@ Preferred communication style: Simple, everyday language.
   - "Try Again" (primary) - Preserves in-memory state, just clears error
   - "Return to Home" (secondary) - Full refresh for persistent errors
   - Expandable error details for debugging
+- **ParseErrorDisplay**: Friendly parse failure UI with recovery options and format hints
 
 ### Export Experience
 - **ExportDialog**: Added loading states, better descriptions, auto-close on empty export, improved error handling

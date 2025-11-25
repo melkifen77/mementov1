@@ -80,6 +80,8 @@ export class GenericAdapter implements TraceAdapter {
 
       const nodeIds = expandedSteps.map((step, index) => this.extractId(step, index, mapping));
       
+      const toolCallIdToNodeId = this.buildToolCallIdMap(expandedSteps, nodeIds);
+      
       const nodes: TraceNode[] = expandedSteps.map((step, index) => {
         const type = this.detectType(step, mapping);
         const content = this.extractContent(step, mapping);
@@ -96,7 +98,7 @@ export class GenericAdapter implements TraceAdapter {
           content,
           timestamp,
           confidence,
-          parentId: this.extractParentId(step, index, nodeIds, mapping),
+          parentId: this.extractParentId(step, index, nodeIds, mapping, toolCallIdToNodeId),
           order: step.order !== undefined ? step.order : index,
           metadata: this.sanitizeMetadata(step)
         };
@@ -247,17 +249,18 @@ export class GenericAdapter implements TraceAdapter {
 
   private expandSteps(steps: any[], mapping?: FieldMapping): any[] {
     const expanded: any[] = [];
+    let globalIndex = 0;
     
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       
       if (typeof step === 'string') {
-        expanded.push({ content: step, _originalIndex: i });
+        expanded.push({ content: step, _originalIndex: i, _globalIndex: globalIndex++ });
         continue;
       }
       
       if (typeof step !== 'object' || step === null) {
-        expanded.push({ content: String(step), _originalIndex: i });
+        expanded.push({ content: String(step), _originalIndex: i, _globalIndex: globalIndex++ });
         continue;
       }
 
@@ -265,20 +268,38 @@ export class GenericAdapter implements TraceAdapter {
         const [first, second] = step;
         
         if (typeof first === 'object' && first !== null && 
-            (first.tool || first.action || first.name)) {
+            (first.tool || first.action || first.name || first.log)) {
+          const actionId = `step-${i}-action`;
+          const obsId = `step-${i}-observation`;
+          
+          const toolName = first.tool || first.action || first.name || 'tool';
+          const toolInput = first.tool_input || first.input || first.args || '';
+          const actionContent = first.log || 
+            (typeof toolInput === 'string' ? `${toolName}: ${toolInput}` : 
+             `${toolName}\n${JSON.stringify(toolInput, null, 2)}`);
+          
           expanded.push({
             ...first,
+            id: actionId,
+            content: actionContent,
             type: 'action',
             _originalIndex: i,
-            _tupleIndex: 0
+            _tupleIndex: 0,
+            _globalIndex: globalIndex++,
+            _linkedObservationId: obsId
           });
           
-          const obsContent = typeof second === 'string' ? second : JSON.stringify(second, null, 2);
+          const obsContent = typeof second === 'string' ? second : 
+                            (second === null || second === undefined) ? '[No result]' :
+                            JSON.stringify(second, null, 2);
           expanded.push({
+            id: obsId,
             content: obsContent,
             type: 'observation',
             _originalIndex: i,
-            _tupleIndex: 1
+            _tupleIndex: 1,
+            _globalIndex: globalIndex++,
+            _linkedActionId: actionId
           });
           continue;
         }
@@ -286,9 +307,12 @@ export class GenericAdapter implements TraceAdapter {
 
       const subSteps = this.extractSubSteps(step, i);
       if (subSteps.length > 0) {
-        expanded.push(...subSteps);
+        for (const subStep of subSteps) {
+          subStep._globalIndex = globalIndex++;
+          expanded.push(subStep);
+        }
       } else {
-        expanded.push({ ...step, _originalIndex: i });
+        expanded.push({ ...step, _originalIndex: i, _globalIndex: globalIndex++ });
       }
     }
     
@@ -488,10 +512,61 @@ export class GenericAdapter implements TraceAdapter {
     return undefined;
   }
 
-  private extractParentId(step: any, index: number, nodeIds: string[], mapping?: FieldMapping): string | null {
+  private buildToolCallIdMap(steps: any[], nodeIds: string[]): Map<string, string> {
+    const map = new Map<string, string>();
+    
+    steps.forEach((step, index) => {
+      if (step.tool_calls && Array.isArray(step.tool_calls)) {
+        for (const tc of step.tool_calls) {
+          if (tc.id) {
+            map.set(tc.id, nodeIds[index]);
+          }
+          if (tc.function?.id) {
+            map.set(tc.function.id, nodeIds[index]);
+          }
+        }
+      }
+      
+      if (step.function_call) {
+        if (step.function_call.id) {
+          map.set(step.function_call.id, nodeIds[index]);
+        }
+        if (step.function_call.name) {
+          map.set(`func:${step.function_call.name}`, nodeIds[index]);
+        }
+      }
+
+      if (step._linkedObservationId && step.tool_calls) {
+        for (const tc of step.tool_calls) {
+          if (tc.id) {
+            map.set(tc.id, nodeIds[index]);
+          }
+        }
+      }
+    });
+    
+    return map;
+  }
+
+  private extractParentId(
+    step: any, 
+    index: number, 
+    nodeIds: string[], 
+    mapping?: FieldMapping,
+    toolCallIdMap?: Map<string, string>
+  ): string | null {
     if (mapping?.parentIdField) {
       const customParent = this.getNestedValue(step, mapping.parentIdField);
       if (customParent !== undefined && customParent !== null) return String(customParent);
+    }
+
+    if (step._linkedActionId) {
+      return step._linkedActionId;
+    }
+
+    if (step.tool_call_id && toolCallIdMap) {
+      const parentId = toolCallIdMap.get(step.tool_call_id);
+      if (parentId) return parentId;
     }
     
     const parentFields = ['parentId', 'parent_id', 'parent', 'parentNodeId', 'source', 'from', 'prev'];
@@ -510,10 +585,17 @@ export class GenericAdapter implements TraceAdapter {
     }
     
     if (index === 0) return null;
+    
     return nodeIds[index - 1] || null;
   }
 
   private detectType(step: any, mapping?: FieldMapping): NodeType {
+    if (step.type === 'action') return 'action';
+    if (step.type === 'observation') return 'observation';
+    if (step.type === 'thought') return 'thought';
+    if (step.type === 'output') return 'output';
+    if (step.type === 'system') return 'system';
+    
     if (mapping?.typeField) {
       const customType = this.getNestedValue(step, mapping.typeField);
       if (customType) {
@@ -530,7 +612,19 @@ export class GenericAdapter implements TraceAdapter {
       if (key === 'output' || key === 'final_answer' || key === 'answer') return 'output';
     }
 
-    if (step.type !== undefined) {
+    if (step.role === 'tool' || step.role === 'function') {
+      return 'observation';
+    }
+
+    if (step.role === 'system') {
+      return 'system';
+    }
+
+    if (step.tool_call_id && step.content !== undefined) {
+      return 'observation';
+    }
+
+    if (step.type !== undefined && step.type !== null) {
       const normalized = this.normalizeType(String(step.type).toLowerCase());
       if (normalized !== 'other') return normalized;
     }
