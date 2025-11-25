@@ -12,7 +12,27 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Improvements (November 2025)
 
-### Robust JSON Ingestion Layer (Latest)
+### Debugging Assistant Upgrade (Latest)
+- **Trace Analysis Module** (shared/analysis/trace-analyzer.ts):
+  - Automated failure detection for 6 issue types: loops, missing observations, empty results, suspicious transitions, contradictions, and ignored errors
+  - Risk assessment (Low/Medium/High) based on issue severity and count
+  - Issues attached to individual nodes with debugging suggestions
+- **Enhanced LangGraph Support** (shared/adapters/generic.ts):
+  - Extracts: nodeName, stateBefore, stateAfter, config, runId, threadId, checkpoint, edges
+  - Full LangGraph metadata normalization and display
+- **Issue Summary Widget** (client/src/components/IssueSummary.tsx):
+  - Floating panel showing risk level with color coding
+  - Collapsible issue frequency counts by type
+- **Enhanced NodeInspector** (client/src/components/NodeInspector.tsx):
+  - Issues section with title, description, and suggested fix
+  - LangGraph Details section with state/config/edges
+  - Risk level display for output nodes
+- **Visual Issue Indicators**:
+  - Graph nodes show issue count badges and risk indicators
+  - Timeline view displays issue and risk badges
+- **Sample Traces**: Added "With Issues (Debug)" sample for testing failure detection
+
+### Robust JSON Ingestion Layer
 - **Canonical Step Format**: Unified internal model with id, parent_id, type, content, timestamp, raw fields
 - **Smart Array Detection**: Searches root, known keys (steps, trace, events, messages, nodes, intermediate_steps, tool_calls), nested paths, and fallback to any array
 - **Field Mapping Heuristics**:
@@ -110,9 +130,13 @@ Preferred communication style: Simple, everyday language.
 **Database Approach**: No active database usage in current implementation. The application is stateless - all trace data processed client-side without persistence. Database infrastructure prepared for future features (saving traces, user accounts, etc.).
 
 **Data Models** (`shared/models.ts`):
-- `TraceNode`: Individual execution step with type, content, timestamp, confidence, parent relationships, and flexible metadata
-- `TraceRun`: Container for a complete trace with source identifier and node collection
+- `TraceNode`: Individual execution step with type, content, timestamp, confidence, parent relationships, issues, riskLevel, langGraphDetails, and flexible metadata
+- `TraceRun`: Container for a complete trace with source identifier, node collection, issues, riskLevel, riskExplanation, and issueSummary
 - `NodeType`: Type union for categorizing steps (thought, action, observation, output, system, other)
+- `IssueType`: Issue categories (loop, missing_observation, error_ignored, empty_result, contradiction_candidate, suspicious_transition)
+- `RiskLevel`: Risk assessment levels (low, medium, high)
+- `TraceIssue`: Issue object with type, nodeId, title, description, suggestedFix, and severity
+- `LangGraphDetails`: LangGraph-specific metadata (nodeName, stateBefore, stateAfter, config, runId, threadId, checkpoint, edges)
 
 ### Authentication and Authorization
 
