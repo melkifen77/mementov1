@@ -1,12 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, FileJson, Sparkles, Settings } from 'lucide-react';
+import { Upload, FileJson, Sparkles, FlaskConical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { CustomMappingDialog } from './CustomMappingDialog';
 import { ParseErrorDisplay } from './ParseErrorDisplay';
 import { FieldMapping, ParseResult } from '@shared/models';
 import { GenericAdapter } from '@shared/adapters/generic';
+import { ALL_SAMPLES } from '@/lib/sample-traces';
 
 interface UploadZoneProps {
   onUpload: (jsonData: any, mapping?: FieldMapping) => void;
@@ -139,6 +148,15 @@ export function UploadZone({ onUpload, onParseResult }: UploadZoneProps) {
     setParseError(null);
   };
 
+  const handleSampleSelect = (sampleName: string) => {
+    const sample = ALL_SAMPLES[sampleName as keyof typeof ALL_SAMPLES];
+    if (sample) {
+      const jsonStr = JSON.stringify(sample, null, 2);
+      setJsonInput(jsonStr);
+      tryParse(sample);
+    }
+  };
+
   const handleOpenCustomMapping = () => {
     setShowMappingDialog(true);
   };
@@ -254,6 +272,29 @@ export function UploadZone({ onUpload, onParseResult }: UploadZoneProps) {
               <Sparkles className="h-4 w-4 mr-2" />
               Visualize Trace
             </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="lg" data-testid="button-samples">
+                  <FlaskConical className="h-4 w-4 mr-2" />
+                  Samples
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Try Sample Traces</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {Object.keys(ALL_SAMPLES).map((name) => (
+                  <DropdownMenuItem 
+                    key={name}
+                    onClick={() => handleSampleSelect(name)}
+                    data-testid={`sample-${name.toLowerCase().replace(/\s+/g, '-')}`}
+                  >
+                    {name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
             <CustomMappingDialog 
               mapping={mapping} 
               onMappingChange={handleMappingChange}
