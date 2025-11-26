@@ -69,7 +69,22 @@ export class GenericAdapter implements TraceAdapter {
         };
       }
 
-      const expandedSteps = this.expandSteps(rawSteps, mapping);
+      let expandedSteps = this.expandSteps(rawSteps, mapping);
+      
+      // For LangChain traces, include initial thought (from steps array) and final output
+      if (detectedFormat === 'langchain') {
+        const supplementary = this.extractLangChainSupplementaryNodes(raw, expandedSteps.length);
+        if (supplementary.initialThought) {
+          expandedSteps = [supplementary.initialThought, ...expandedSteps];
+        }
+        // Only add final output if there isn't already an output node in expanded steps
+        const hasExistingOutput = expandedSteps.some(s => 
+          s.type === 'output' || s._originalKey === 'output' || s._originalKey === 'final_answer'
+        );
+        if (supplementary.finalOutput && !hasExistingOutput) {
+          expandedSteps = [...expandedSteps, supplementary.finalOutput];
+        }
+      }
       
       if (expandedSteps.length === 0) {
         return {
@@ -163,6 +178,13 @@ export class GenericAdapter implements TraceAdapter {
 
     if (typeof raw !== 'object' || raw === null) {
       return { steps: null };
+    }
+
+    // Priority: Check for LangChain intermediate_steps FIRST (before generic 'steps')
+    // LangChain traces often have both 'steps' (with just initial thought) and 
+    // 'intermediate_steps' (with the actual action/observation pairs)
+    if (Array.isArray(raw.intermediate_steps) && raw.intermediate_steps.length > 0) {
+      return { steps: raw.intermediate_steps, arrayPath: 'intermediate_steps', detectedFormat: 'langchain' };
     }
 
     for (const key of KNOWN_STEP_ARRAY_KEYS) {
@@ -449,6 +471,56 @@ export class GenericAdapter implements TraceAdapter {
         next._linkedActionId = current.id;
       }
     }
+  }
+
+  // Extract initial thought from steps array and final output from top-level fields for LangChain traces
+  private extractLangChainSupplementaryNodes(raw: any, intermediateStepsCount: number): { 
+    initialThought: any | null; 
+    finalOutput: any | null;
+  } {
+    let initialThought: any | null = null;
+    let finalOutput: any | null = null;
+    
+    // Extract initial thought from steps array (separate from intermediate_steps)
+    if (Array.isArray(raw.steps) && raw.steps.length > 0) {
+      const firstStep = raw.steps[0];
+      if (typeof firstStep === 'object' && firstStep !== null) {
+        // Check if it's a thought/thinking step
+        const thoughtContent = firstStep.thought || firstStep.thinking || firstStep.reasoning || 
+                               firstStep.content || firstStep.text || firstStep.message;
+        const stepType = firstStep.type;
+        
+        if (thoughtContent || stepType === 'thought') {
+          const computedContent = typeof thoughtContent === 'string' ? thoughtContent : 
+                                  thoughtContent ? JSON.stringify(thoughtContent, null, 2) : 
+                                  '[Initial thought]';
+          initialThought = {
+            ...firstStep,
+            id: 'initial-thought',
+            type: 'thought',
+            content: computedContent,
+            _originalIndex: -1,
+            _globalIndex: -1
+          };
+        }
+      }
+    }
+    
+    // Extract final output from top-level output/final_answer fields
+    // Only if it's not already included in intermediate_steps
+    const outputContent = raw.output || raw.final_answer || raw.result || raw.answer;
+    if (outputContent !== undefined && outputContent !== null) {
+      finalOutput = {
+        id: 'final-output',
+        type: 'output',
+        content: typeof outputContent === 'string' ? outputContent : 
+                 JSON.stringify(outputContent, null, 2),
+        _originalIndex: intermediateStepsCount,
+        _globalIndex: intermediateStepsCount + (initialThought ? 1 : 0)
+      };
+    }
+    
+    return { initialThought, finalOutput };
   }
 
   private extractSubSteps(step: any, originalIndex: number): any[] {
