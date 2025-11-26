@@ -173,7 +173,9 @@ export class GenericAdapter implements TraceAdapter {
     }
 
     if (Array.isArray(raw)) {
-      return { steps: raw, arrayPath: 'root', detectedFormat: 'array' };
+      // Detect format based on step schema patterns
+      const format = this.detectArrayFormat(raw);
+      return { steps: raw, arrayPath: 'root', detectedFormat: format };
     }
 
     if (typeof raw !== 'object' || raw === null) {
@@ -366,6 +368,76 @@ export class GenericAdapter implements TraceAdapter {
     }
     
     return expanded;
+  }
+
+  /**
+   * Deterministic format detection for root-level arrays
+   * Uses presence of action/observation fields and schema patterns
+   */
+  private detectArrayFormat(steps: any[]): string {
+    if (!Array.isArray(steps) || steps.length === 0) return 'array';
+    
+    let actionCount = 0;
+    let observationCount = 0;
+    let hasLangChainSchema = false;
+    let hasTuples = false;
+    let hasLangGraphSchema = false;
+    
+    for (const step of steps) {
+      // Check for LangChain tuple format: [[action, observation], ...]
+      if (Array.isArray(step) && step.length === 2) {
+        const [first] = step;
+        if (typeof first === 'object' && first !== null && 
+            (first.tool || first.action || first.log)) {
+          hasTuples = true;
+        }
+      }
+      
+      if (typeof step !== 'object' || step === null || Array.isArray(step)) continue;
+      
+      // LangChain action schema: { action: string, tool_input: any }
+      if (step.action !== undefined && typeof step.action === 'string') {
+        actionCount++;
+        if (step.tool_input !== undefined) {
+          hasLangChainSchema = true;
+        }
+      }
+      
+      // LangChain observation schema: { observation: any }
+      if (step.observation !== undefined) {
+        observationCount++;
+        hasLangChainSchema = true;
+      }
+      
+      // LangGraph schema: has node, graph_id, or langgraph markers
+      if (step.node !== undefined || step.graph_id !== undefined || 
+          step.langgraph_node !== undefined || step.checkpoint !== undefined) {
+        hasLangGraphSchema = true;
+      }
+    }
+    
+    // Deterministic detection priority:
+    // 1. LangChain tuple format
+    if (hasTuples) {
+      return 'langchain';
+    }
+    
+    // 2. LangChain separate action/observation format
+    if (hasLangChainSchema && actionCount > 0 && observationCount > 0) {
+      return 'langchain';
+    }
+    
+    // 3. LangGraph format
+    if (hasLangGraphSchema) {
+      return 'langgraph';
+    }
+    
+    // 4. Generic array with action/observation fields (still LangChain-like)
+    if (actionCount > 0 && observationCount > 0) {
+      return 'langchain';
+    }
+    
+    return 'array';
   }
 
   // Detect LangChain intermediate_steps format with separate action/observation objects

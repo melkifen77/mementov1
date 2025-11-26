@@ -510,36 +510,112 @@ export function detectLoops(nodes: TraceNode[], labels: Map<string, StepLabels>)
 
 /**
  * SUSPICIOUS TRANSITIONS (Low Severity)
- * Pattern: Unexpected step sequences
+ * Pattern: Unexpected step sequences with better heuristics
+ * 
+ * Improved heuristics:
+ * - Content length mismatch: Very short action with very long observation (or vice versa)
+ * - Missing arguments: Action with no tool_input or arguments
+ * - Missing tool response: Action followed by output with no observation
+ * - Skip false positives for common valid patterns
  */
-export function detectSuspiciousTransitions(nodes: TraceNode[]): TraceIssue[] {
+export function detectSuspiciousTransitions(nodes: TraceNode[], labels: Map<string, StepLabels>): TraceIssue[] {
   const issues: TraceIssue[] = [];
   
-  const expectedTransitions: Record<string, string[]> = {
-    thought: ['action', 'thought', 'output'],
-    action: ['observation', 'output', 'thought'], // thought added for "action → thought" without observation
-    observation: ['thought', 'action', 'output', 'observation'],
-    output: [],
-    system: ['thought', 'action', 'output', 'system'],
+  // Valid transition patterns - be more permissive to avoid false positives
+  const validTransitions: Record<string, string[]> = {
+    thought: ['action', 'thought', 'output', 'observation', 'system'],
+    action: ['observation', 'output', 'thought', 'action', 'system'],
+    observation: ['thought', 'action', 'output', 'observation', 'system'],
+    output: ['thought', 'action', 'output', 'system'],
+    system: ['thought', 'action', 'output', 'system', 'observation'],
     other: ['thought', 'action', 'observation', 'output', 'system', 'other']
   };
   
   for (let i = 0; i < nodes.length - 1; i++) {
     const current = nodes[i];
     const next = nodes[i + 1];
+    const currentLabels = labels.get(current.id);
+    const nextLabels = labels.get(next.id);
     
-    const expected = expectedTransitions[current.type] || [];
-    if (expected.length > 0 && !expected.includes(next.type)) {
-      issues.push({
-        id: generateIssueId(),
-        type: 'suspicious_transition',
-        severity: 'warning',
-        nodeIds: [current.id, next.id],
-        title: `Unusual: ${current.type} → ${next.type}`,
-        description: `A ${current.type} is typically followed by ${expected.join(' or ')}, not ${next.type}. This may indicate a logging gap or flow issue.`,
-        suggestion: ISSUE_SUGGESTIONS.suspicious_transition
-      });
+    // Check 1: Action → Output without observation (might be missing tool response)
+    // Only flag if action has a tool name (not just a generic thought)
+    if (current.type === 'action' && next.type === 'output') {
+      const toolName = currentLabels?.toolName;
+      if (toolName && toolName !== 'unknown') {
+        // Check if action has meaningful input that would expect a response
+        const toolInput = currentLabels?.toolInput;
+        const hasInput = toolInput !== undefined && toolInput !== null && 
+                        (typeof toolInput !== 'object' || Object.keys(toolInput).length > 0);
+        
+        if (hasInput) {
+          issues.push({
+            id: generateIssueId(),
+            type: 'suspicious_transition',
+            severity: 'warning',
+            nodeIds: [current.id, next.id],
+            title: `Action "${toolName}" → Output without observation`,
+            description: `Tool "${toolName}" was called but there's no observation/result before the output. The tool response may not have been logged.`,
+            suggestion: ISSUE_SUGGESTIONS.suspicious_transition
+          });
+        }
+      }
+      continue;
     }
+    
+    // Check 2: Action without arguments (missing tool_input)
+    if (current.type === 'action') {
+      const toolName = currentLabels?.toolName;
+      const toolInput = currentLabels?.toolInput;
+      const hasNoInput = toolInput === undefined || toolInput === null ||
+                        (typeof toolInput === 'object' && Object.keys(toolInput).length === 0);
+      
+      // Only flag if it's a tool that would typically need arguments
+      const toolsNeedingArgs = ['search', 'query', 'fetch', 'get', 'post', 'api', 'call'];
+      const needsArgs = toolName && toolsNeedingArgs.some(t => toolName.toLowerCase().includes(t));
+      
+      if (needsArgs && hasNoInput) {
+        issues.push({
+          id: generateIssueId(),
+          type: 'suspicious_transition',
+          severity: 'warning',
+          nodeIds: [current.id],
+          title: `Action "${toolName}" missing arguments`,
+          description: `Tool "${toolName}" was called without input arguments. This may indicate incomplete logging or a misconfigured tool call.`,
+          suggestion: 'Verify that tool inputs are being logged correctly.'
+        });
+      }
+    }
+    
+    // Check 3: Content length mismatch (very short action, very long observation)
+    // This could indicate a parsing issue or corrupted data
+    if (current.type === 'action' && next.type === 'observation') {
+      const actionLen = current.content?.length || 0;
+      const obsLen = next.content?.length || 0;
+      
+      // Flag extreme mismatches (action < 10 chars, observation > 5000 chars)
+      // or (action > 5000 chars, observation < 10 chars)
+      const extremeShort = 10;
+      const extremeLong = 5000;
+      
+      if ((actionLen < extremeShort && obsLen > extremeLong) ||
+          (actionLen > extremeLong && obsLen < extremeShort)) {
+        // Don't flag if observation is an error (errors can be short)
+        if (!nextLabels?.isErrorObservation) {
+          issues.push({
+            id: generateIssueId(),
+            type: 'suspicious_transition',
+            severity: 'warning',
+            nodeIds: [current.id, next.id],
+            title: 'Content length mismatch',
+            description: `Unusual content length difference between action (${actionLen} chars) and observation (${obsLen} chars). This may indicate a parsing or logging issue.`,
+            suggestion: 'Review the raw data to ensure content is being extracted correctly.'
+          });
+        }
+      }
+    }
+    
+    // Check 4: Unexpected transition types (only for truly unusual patterns)
+    // Skip this check as the above heuristics are more specific and useful
   }
   
   return issues;
@@ -589,75 +665,70 @@ export function detectContradictions(nodes: TraceNode[]): TraceIssue[] {
 // RISK SCORING
 // ============================================================================
 
-// Risk tier mapping - explicit override based on issue types
-const HIGH_TIER_ISSUES: IssueType[] = ['guessing_after_error', 'commit_after_empty'];
-const MEDIUM_TIER_ISSUES: IssueType[] = ['unhandled_error', 'missing_observation', 'error_ignored', 'loop'];
-const LOW_TIER_ISSUES: IssueType[] = ['empty_result', 'suspicious_transition', 'contradiction_candidate'];
+/**
+ * Risk scoring rules:
+ * - HIGH: Any unhandled error (error nodes present) OR critical issues (guessing_after_error, commit_after_empty)
+ * - MEDIUM: Suspicious transitions, loops, missing observations
+ * - LOW: Clean trace with no issues
+ */
 
-export function calculateRiskLevel(issues: TraceIssue[]): { level: RiskLevel; explanation: string } {
+export function calculateRiskLevel(
+  issues: TraceIssue[], 
+  errorNodeCount: number = 0
+): { level: RiskLevel; explanation: string } {
+  // HIGH risk: Any error nodes present OR critical behavioral issues
+  const criticalIssues = ['guessing_after_error', 'commit_after_empty', 'unhandled_error', 'error_ignored'];
+  const hasCriticalIssue = issues.some(i => criticalIssues.includes(i.type));
+  
+  if (errorNodeCount > 0 || hasCriticalIssue) {
+    const reasons: string[] = [];
+    if (errorNodeCount > 0) {
+      reasons.push(`${errorNodeCount} error(s) detected`);
+    }
+    const guessingCount = issues.filter(i => i.type === 'guessing_after_error').length;
+    const commitEmptyCount = issues.filter(i => i.type === 'commit_after_empty').length;
+    const unhandledCount = issues.filter(i => i.type === 'unhandled_error').length;
+    const errorIgnoredCount = issues.filter(i => i.type === 'error_ignored').length;
+    
+    if (guessingCount > 0) reasons.push(`${guessingCount} case(s) of guessing after error`);
+    if (commitEmptyCount > 0) reasons.push(`${commitEmptyCount} commit(s) with empty data`);
+    if (unhandledCount > 0) reasons.push(`${unhandledCount} unhandled error(s)`);
+    if (errorIgnoredCount > 0) reasons.push(`${errorIgnoredCount} error(s) ignored`);
+    
+    return { 
+      level: 'high', 
+      explanation: `Risk high: ${reasons.join(', ')}.`
+    };
+  }
+  
+  // MEDIUM risk: Suspicious transitions, loops, missing observations
+  const mediumIssues = ['suspicious_transition', 'loop', 'missing_observation'];
+  const hasMediumIssue = issues.some(i => mediumIssues.includes(i.type));
+  
+  if (hasMediumIssue) {
+    const reasons: string[] = [];
+    const loopCount = issues.filter(i => i.type === 'loop').length;
+    const missingObsCount = issues.filter(i => i.type === 'missing_observation').length;
+    const suspiciousCount = issues.filter(i => i.type === 'suspicious_transition').length;
+    
+    if (loopCount > 0) reasons.push(`${loopCount} loop(s) detected`);
+    if (missingObsCount > 0) reasons.push(`${missingObsCount} missing observation(s)`);
+    if (suspiciousCount > 0) reasons.push(`${suspiciousCount} suspicious transition(s)`);
+    
+    return { 
+      level: 'medium', 
+      explanation: `Risk medium: ${reasons.join(', ')}.`
+    };
+  }
+  
+  // LOW risk: Clean trace or minor issues only
   if (issues.length === 0) {
     return { level: 'low', explanation: 'No issues detected in this trace.' };
   }
   
-  // Check for High tier issues first (explicit override)
-  const hasHighTier = issues.some(i => HIGH_TIER_ISSUES.includes(i.type));
-  
-  // Check for Medium tier issues
-  const hasMediumTier = issues.some(i => MEDIUM_TIER_ISSUES.includes(i.type));
-  
-  // Build explanation reasons
-  const reasons: string[] = [];
-  
-  // Count specific high-priority issues
-  const guessingCount = issues.filter(i => i.type === 'guessing_after_error').length;
-  const commitEmptyCount = issues.filter(i => i.type === 'commit_after_empty').length;
-  const unhandledCount = issues.filter(i => i.type === 'unhandled_error').length;
-  const loopCount = issues.filter(i => i.type === 'loop').length;
-  const missingObsCount = issues.filter(i => i.type === 'missing_observation').length;
-  const errorIgnoredCount = issues.filter(i => i.type === 'error_ignored').length;
-  
-  if (guessingCount > 0) {
-    reasons.push(`${guessingCount} case(s) of guessing after error`);
-  }
-  if (commitEmptyCount > 0) {
-    reasons.push(`${commitEmptyCount} commit(s) with empty data`);
-  }
-  if (unhandledCount > 0) {
-    reasons.push(`${unhandledCount} unhandled error(s)`);
-  }
-  if (loopCount > 0) {
-    reasons.push(`${loopCount} loop(s) detected`);
-  }
-  if (missingObsCount > 0) {
-    reasons.push(`${missingObsCount} missing observation(s)`);
-  }
-  if (errorIgnoredCount > 0) {
-    reasons.push(`${errorIgnoredCount} error(s) ignored`);
-  }
-  
-  // If no high-priority reasons, add generic count
-  if (reasons.length === 0) {
-    const warningCount = issues.filter(i => i.severity === 'warning').length;
-    if (warningCount > 0) {
-      reasons.push(`${warningCount} warning(s)`);
-    }
-  }
-  
-  // Explicit tier-based risk level (NOT based on severity field)
-  let level: RiskLevel;
-  if (hasHighTier) {
-    level = 'high';
-  } else if (hasMediumTier) {
-    level = 'medium';
-  } else {
-    level = 'low';
-  }
-  
-  return {
-    level,
-    explanation: reasons.length > 0 
-      ? `Risk ${level}: ${reasons.join(', ')}.`
-      : 'Minor issues detected.'
+  return { 
+    level: 'low', 
+    explanation: `${issues.length} minor issue(s) detected.`
   };
 }
 
@@ -692,11 +763,45 @@ export function summarizeIssues(issues: TraceIssue[]): Record<IssueType, number>
   return summary;
 }
 
+/**
+ * Check if a node has any error indicators
+ * Looks for: error keys in metadata, exception fields, error type, error status
+ */
+function hasErrorIndicators(node: TraceNode): boolean {
+  const metadata = node.metadata || {};
+  const content = (node.content || '').toLowerCase();
+  
+  // Check metadata for error fields
+  if (metadata.error !== undefined && metadata.error !== false && metadata.error !== null) return true;
+  if (metadata.exception !== undefined) return true;
+  if (metadata.status === 'error' || metadata.status === 'failed') return true;
+  if (metadata.error_type !== undefined) return true;
+  if (metadata.error_message !== undefined) return true;
+  if (metadata.traceback !== undefined) return true;
+  if (metadata.stack_trace !== undefined) return true;
+  
+  // Check for error in raw data
+  const raw = metadata.raw || metadata;
+  if (raw.error !== undefined && raw.error !== false && raw.error !== null) return true;
+  if (raw.exception !== undefined) return true;
+  if (raw.error_code !== undefined) return true;
+  
+  // Check node type
+  if (node.type === 'system' && /error|failed|exception/i.test(content)) return true;
+  
+  return false;
+}
+
 export function computeTraceStats(nodes: TraceNode[], labels: Map<string, StepLabels>, issues: TraceIssue[]): TraceStats {
   let totalErrors = 0;
+  
   for (const node of nodes) {
     const nodeLabels = labels.get(node.id);
-    if (nodeLabels?.isErrorObservation) {
+    
+    // Count errors from:
+    // 1. isErrorObservation label (pattern-based detection)
+    // 2. Error indicators in metadata (key-based detection)
+    if (nodeLabels?.isErrorObservation || hasErrorIndicators(node)) {
       totalErrors++;
     }
   }
@@ -734,7 +839,7 @@ export function analyzeTrace(trace: TraceRun): TraceRun & { stats?: TraceStats }
     ...detectLoops(nodes, labels),
     // Lower priority
     ...detectEmptyResults(nodes, labels),
-    ...detectSuspiciousTransitions(nodes),
+    ...detectSuspiciousTransitions(nodes, labels),
     ...detectContradictions(nodes)
   ];
   
@@ -753,17 +858,17 @@ export function analyzeTrace(trace: TraceRun): TraceRun & { stats?: TraceStats }
     issues: nodeIssueMap.get(node.id) || []
   }));
   
-  // Step 4: Calculate risk level
-  const { level, explanation } = calculateRiskLevel(allIssues);
+  // Step 4: Compute stats first (need error count for risk calculation)
+  const stats = computeTraceStats(nodes, labels, allIssues);
+  
+  // Step 5: Calculate risk level with error count
+  const { level, explanation } = calculateRiskLevel(allIssues, stats.totalErrors);
   
   // Attach risk level to output nodes
   const outputNodes = analyzedNodes.filter(n => n.type === 'output');
   for (const outputNode of outputNodes) {
     outputNode.riskLevel = level;
   }
-  
-  // Step 5: Compute stats
-  const stats = computeTraceStats(nodes, labels, allIssues);
   
   return {
     ...trace,
