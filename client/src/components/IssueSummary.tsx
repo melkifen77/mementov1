@@ -82,12 +82,14 @@ export function IssueSummary({ trace, onClose }: IssueSummaryProps) {
       className="bg-background/95 backdrop-blur-xl border border-border rounded-lg shadow-lg overflow-hidden"
       data-testid="issue-summary-panel"
     >
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between gap-2 p-3 hover:bg-muted/50 transition-colors"
+      <div
+        className="w-full flex items-center justify-between gap-2 p-3 hover:bg-muted/50 transition-colors cursor-pointer"
         data-testid="button-toggle-summary"
       >
-        <div className="flex items-center gap-2">
+        <div 
+          className="flex items-center gap-2 flex-1"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
           <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium">Trace Analysis</span>
           {totalIssues > 0 && (
@@ -114,13 +116,18 @@ export function IssueSummary({ trace, onClose }: IssueSummaryProps) {
               <X className="h-3 w-3" />
             </Button>
           )}
-          {isExpanded ? (
-            <ChevronUp className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          )}
+          <div 
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="cursor-pointer"
+          >
+            {isExpanded ? (
+              <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            )}
+          </div>
         </div>
-      </button>
+      </div>
 
       {isExpanded && (
         <div className="px-3 pb-3 space-y-3">
