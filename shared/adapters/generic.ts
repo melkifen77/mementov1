@@ -259,6 +259,9 @@ export class GenericAdapter implements TraceAdapter {
     const expanded: any[] = [];
     let globalIndex = 0;
     
+    // Detect LangChain intermediate_steps format: separate action/observation objects
+    const isLangChainFormat = this.detectLangChainFormat(steps);
+    
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       
@@ -272,6 +275,7 @@ export class GenericAdapter implements TraceAdapter {
         continue;
       }
 
+      // Handle LangChain tuple format: [[action, observation], ...]
       if (Array.isArray(step) && step.length === 2) {
         const [first, second] = step;
         
@@ -313,6 +317,16 @@ export class GenericAdapter implements TraceAdapter {
         }
       }
 
+      // Handle LangChain separate objects format: {action, tool_input} or {observation}
+      if (isLangChainFormat) {
+        const langChainNode = this.extractLangChainNode(step, i, globalIndex, expanded);
+        if (langChainNode) {
+          langChainNode._globalIndex = globalIndex++;
+          expanded.push(langChainNode);
+          continue;
+        }
+      }
+
       const subSteps = this.extractSubSteps(step, i);
       if (subSteps.length > 0) {
         for (const subStep of subSteps) {
@@ -324,7 +338,117 @@ export class GenericAdapter implements TraceAdapter {
       }
     }
     
+    // Link LangChain action nodes to their following observation nodes
+    if (isLangChainFormat) {
+      this.linkLangChainNodes(expanded);
+    }
+    
     return expanded;
+  }
+
+  // Detect LangChain intermediate_steps format with separate action/observation objects
+  private detectLangChainFormat(steps: any[]): boolean {
+    if (!Array.isArray(steps) || steps.length === 0) return false;
+    
+    let hasAction = false;
+    let hasObservation = false;
+    
+    for (const step of steps) {
+      if (typeof step !== 'object' || step === null || Array.isArray(step)) continue;
+      
+      // LangChain action format: { action: "tool_name", tool_input: {...} }
+      if (step.action !== undefined && (step.tool_input !== undefined || typeof step.action === 'string')) {
+        hasAction = true;
+      }
+      // LangChain observation format: { observation: {...} } or { observation: "result" }
+      if (step.observation !== undefined) {
+        hasObservation = true;
+      }
+    }
+    
+    return hasAction && hasObservation;
+  }
+
+  // Extract a LangChain-formatted node (action or observation)
+  private extractLangChainNode(step: any, originalIndex: number, currentGlobalIndex: number, expandedSoFar: any[]): any | null {
+    // Handle LangChain action: { action: "tool_name", tool_input: {...} }
+    if (step.action !== undefined) {
+      const toolName = typeof step.action === 'string' ? step.action : 
+                       step.action?.tool || step.action?.name || 'tool';
+      const toolInput = step.tool_input || step.input || step.args || {};
+      
+      const actionContent = typeof toolInput === 'string' 
+        ? `${toolName}: ${toolInput}`
+        : `${toolName}\n${JSON.stringify(toolInput, null, 2)}`;
+      
+      return {
+        ...step,
+        id: `step-${originalIndex}-action`,
+        content: actionContent,
+        type: 'action',
+        _originalIndex: originalIndex,
+        _langChainAction: true,
+        tool: toolName,
+        tool_input: toolInput
+      };
+    }
+    
+    // Handle LangChain observation: { observation: {...} } or { observation: "result" }
+    if (step.observation !== undefined) {
+      const obsValue = step.observation;
+      const obsContent = typeof obsValue === 'string' ? obsValue :
+                         (obsValue === null || obsValue === undefined) ? '[No result]' :
+                         JSON.stringify(obsValue, null, 2);
+      
+      return {
+        ...step,
+        id: `step-${originalIndex}-observation`,
+        content: obsContent,
+        type: 'observation',
+        _originalIndex: originalIndex,
+        _langChainObservation: true
+      };
+    }
+    
+    // Handle thought/reasoning nodes
+    if (step.thought !== undefined || step.thinking !== undefined || step.reasoning !== undefined) {
+      const thoughtContent = step.thought || step.thinking || step.reasoning;
+      return {
+        ...step,
+        id: `step-${originalIndex}-thought`,
+        content: typeof thoughtContent === 'string' ? thoughtContent : JSON.stringify(thoughtContent, null, 2),
+        type: 'thought',
+        _originalIndex: originalIndex
+      };
+    }
+    
+    // Handle output/final_answer nodes
+    if (step.output !== undefined || step.final_answer !== undefined) {
+      const outputContent = step.output || step.final_answer;
+      return {
+        ...step,
+        id: `step-${originalIndex}-output`,
+        content: typeof outputContent === 'string' ? outputContent : JSON.stringify(outputContent, null, 2),
+        type: 'output',
+        _originalIndex: originalIndex
+      };
+    }
+    
+    return null;
+  }
+
+  // Link action nodes to their following observation nodes
+  private linkLangChainNodes(expanded: any[]): void {
+    for (let i = 0; i < expanded.length - 1; i++) {
+      const current = expanded[i];
+      const next = expanded[i + 1];
+      
+      // Link action to following observation
+      if (current._langChainAction && next._langChainObservation) {
+        current._linkedObservationId = next.id;
+        next._linkedActionId = current.id;
+      }
+    }
   }
 
   private extractSubSteps(step: any, originalIndex: number): any[] {

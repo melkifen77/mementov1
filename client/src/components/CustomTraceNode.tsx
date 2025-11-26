@@ -63,6 +63,11 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
   const isTokenHeavy = data.metrics?.isTokenHeavy;
   const isHighlighted = data.isHighlighted;
   const isDimmed = data.isDimmed;
+  
+  // Check for specific issue types to show dedicated badges
+  const hasSuspiciousTransition = data.issues?.some(i => i.type === 'suspicious_transition');
+  const hasLoop = data.issues?.some(i => i.type === 'loop');
+  const hasMissingObservation = data.issues?.some(i => i.type === 'missing_observation');
 
   const getBoxShadow = () => {
     if (isHighlighted) {
@@ -143,7 +148,26 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
                 tokens
               </Badge>
             )}
-            {hasIssues && (
+            {hasSuspiciousTransition && (
+              <Badge 
+                className="h-5 px-1.5 py-0 text-[10px] gap-0.5 bg-yellow-500 text-black border-transparent dark:bg-yellow-600 dark:text-black"
+                data-testid={`badge-suspicious-${data.id}`}
+                title="Suspicious transition detected"
+              >
+                <AlertTriangle className="h-3 w-3" />
+                suspicious
+              </Badge>
+            )}
+            {hasLoop && (
+              <Badge 
+                className="h-5 px-1.5 py-0 text-[10px] gap-0.5 bg-orange-500 text-white border-transparent dark:bg-orange-600"
+                data-testid={`badge-loop-${data.id}`}
+                title="Loop detected"
+              >
+                loop
+              </Badge>
+            )}
+            {hasIssues && !hasSuspiciousTransition && !hasLoop && (
               <div className="flex items-center gap-0.5 text-yellow-600" title={`${issueCount} issue${issueCount !== 1 ? 's' : ''}`}>
                 <AlertTriangle className="h-3.5 w-3.5" />
                 <span className="text-xs font-medium">{issueCount}</span>

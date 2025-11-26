@@ -58,6 +58,10 @@ export function TimelineView({ trace, onNodeClick, hoveredIndex, pairedHoveredIn
             const metricsIsSlow = node.metrics?.isSlow;
             const metricsIsTokenHeavy = node.metrics?.isTokenHeavy;
             const metricsDurationMs = node.metrics?.durationMs;
+            
+            // Check for specific issue types
+            const hasSuspiciousTransition = node.issues?.some(i => i.type === 'suspicious_transition');
+            const hasLoop = node.issues?.some(i => i.type === 'loop');
 
             const isPairedHighlight = pairedHoveredIndex === index;
             const isHovered = hoveredIndex === index;
@@ -108,7 +112,24 @@ export function TimelineView({ trace, onNodeClick, hoveredIndex, pairedHoveredIn
                         >
                           {node.type}
                         </Badge>
-                        {hasIssues && (
+                        {hasSuspiciousTransition && (
+                          <Badge 
+                            className="bg-yellow-500 text-black border-transparent dark:bg-yellow-600 dark:text-black"
+                            data-testid={`badge-suspicious-${node.id}`}
+                          >
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            Suspicious Transition
+                          </Badge>
+                        )}
+                        {hasLoop && (
+                          <Badge 
+                            className="bg-orange-500 text-white border-transparent dark:bg-orange-600"
+                            data-testid={`badge-loop-${node.id}`}
+                          >
+                            Loop Detected
+                          </Badge>
+                        )}
+                        {hasIssues && !hasSuspiciousTransition && !hasLoop && (
                           <Badge variant="outline" className="text-yellow-600 border-yellow-600">
                             <AlertTriangle className="h-3 w-3 mr-1" />
                             {issueCount} issue{issueCount !== 1 ? 's' : ''}
