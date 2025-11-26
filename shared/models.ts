@@ -23,6 +23,24 @@ export interface TraceIssue {
   suggestion: string;
 }
 
+export interface TokenUsage {
+  prompt?: number;
+  completion?: number;
+  total?: number;
+}
+
+export interface NodeMetrics {
+  startTime?: number;
+  endTime?: number;
+  durationMs?: number;
+  tokenUsage?: TokenUsage;
+  modelName?: string;
+  hasError?: boolean;
+  errorMessage?: string;
+  isSlow?: boolean;
+  isTokenHeavy?: boolean;
+}
+
 export interface TraceNode {
   id: string;
   type: NodeType;
@@ -35,6 +53,7 @@ export interface TraceNode {
   issues?: TraceIssue[];
   riskLevel?: RiskLevel;
   langGraphDetails?: LangGraphDetails;
+  metrics?: NodeMetrics;
 }
 
 export interface LangGraphDetails {

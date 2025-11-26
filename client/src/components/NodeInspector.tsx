@@ -1,10 +1,11 @@
-import { X, ChevronDown, ChevronUp, Copy, Check, AlertCircle, ExternalLink, GripVertical, AlertTriangle, Lightbulb, Info, Network } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Copy, Check, AlertCircle, ExternalLink, GripVertical, AlertTriangle, Lightbulb, Info, Network, Clock, Zap, Cpu, Timer } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { TraceNode, TraceRun, TraceIssue, RiskLevel } from '@shared/models';
+import { TraceNode, TraceRun, TraceIssue, RiskLevel, NodeMetrics } from '@shared/models';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
 
 /**
@@ -32,9 +33,7 @@ interface NodeInspectorProps {
   trace: TraceRun | null;
   onClose: () => void;
   onNavigateToNode?: (nodeId: string) => void;
-  // Future: Add for multi-selection
-  // selectedNodes?: TraceNode[];
-  // onMultiSelect?: (nodes: TraceNode[]) => void;
+  isCompact?: boolean;
 }
 
 const nodeTypeColors: Record<string, { bg: string; text: string; border: string }> = {
@@ -142,9 +141,30 @@ function JSONViewer({ data, maxHeight = '300px' }: { data: any; maxHeight?: stri
   );
 }
 
-export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeInspectorProps) {
+function formatTimestamp(timestamp: number): string {
+  return new Date(timestamp).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3
+  });
+}
+
+function formatDuration(ms: number): string {
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(2)} seconds`;
+  }
+  return `${Math.round(ms)} ms`;
+}
+
+export function NodeInspector({ node, trace, onClose, onNavigateToNode, isCompact = false }: NodeInspectorProps) {
   const [isRawJsonExpanded, setIsRawJsonExpanded] = useState(false);
+  const [isRawMetadataExpanded, setIsRawMetadataExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedMetadata, setCopiedMetadata] = useState(false);
   const [panelWidth, setPanelWidth] = useState(384); // 96 * 4 = 384px (w-96)
   const [isResizing, setIsResizing] = useState(false);
   const { toast } = useToast();
@@ -198,7 +218,7 @@ export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeIn
   // Copy node JSON
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(node, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify(node ?? {}, null, 2));
       setCopied(true);
       toast({
         title: "Copied!",
@@ -214,7 +234,110 @@ export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeIn
     }
   };
 
+  // Copy metadata JSON
+  const handleCopyMetadata = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(node.metadata ?? {}, null, 2));
+      setCopiedMetadata(true);
+      toast({
+        title: "Copied!",
+        description: "Metadata JSON copied to clipboard"
+      });
+      setTimeout(() => setCopiedMetadata(false), 2000);
+    } catch (err) {
+      toast({
+        title: "Failed to copy",
+        description: "Could not copy to clipboard",
+        variant: "destructive"
+      });
+    }
+  };
+
   const colors = nodeTypeColors[node.type] || nodeTypeColors.other;
+
+  // Extract metrics
+  const metrics = node.metrics || {};
+  const hasMetricsError = metrics.hasError;
+  const hasTiming = metrics.startTime !== undefined || metrics.endTime !== undefined || metrics.durationMs !== undefined;
+  const hasTokenUsage = metrics.tokenUsage && (
+    metrics.tokenUsage.prompt !== undefined || 
+    metrics.tokenUsage.completion !== undefined || 
+    metrics.tokenUsage.total !== undefined
+  );
+
+  if (isCompact) {
+    return (
+      <div className="h-full flex flex-col bg-background/95" data-testid="node-inspector-compact">
+        <div className="flex items-center justify-between p-2 border-b border-border shrink-0">
+          <div className="flex items-center gap-2">
+            <TypeBadge type={node.type} />
+            <span className="text-xs font-mono text-muted-foreground truncate max-w-32">{node.id}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="h-6 w-6"
+              onClick={handleCopy}
+              data-testid="button-copy-json-compact"
+              title="Copy node JSON"
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="h-6 w-6"
+              onClick={onClose}
+              data-testid="button-close-inspector-compact"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+        
+        <ScrollArea className="flex-1">
+          <div className="p-3 space-y-2 text-sm">
+            <pre className="text-xs leading-relaxed font-mono whitespace-pre-wrap break-words bg-muted/50 p-2 rounded-md max-h-32 overflow-auto">
+              {node.content}
+            </pre>
+            
+            {(hasError || hasMetricsError || metrics.isSlow || metrics.isTokenHeavy) && (
+              <div className="flex flex-wrap items-center gap-1">
+                {(hasError || hasMetricsError) && (
+                  <Badge variant="destructive" className="text-xs py-0 px-1.5">
+                    <AlertCircle className="h-2.5 w-2.5 mr-0.5" />
+                    Error
+                  </Badge>
+                )}
+                {metrics.isSlow && (
+                  <Badge variant="outline" className="text-xs py-0 px-1.5 border-yellow-500 text-yellow-600">
+                    Slow
+                  </Badge>
+                )}
+              </div>
+            )}
+            
+            {node.confidence !== undefined && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Confidence:</span>
+                <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full"
+                    style={{
+                      width: `${node.confidence * 100}%`,
+                      backgroundColor: colors.border
+                    }}
+                  />
+                </div>
+                <span className="text-xs font-medium">{Math.round(node.confidence * 100)}%</span>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -238,12 +361,6 @@ export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeIn
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">Node Details</h2>
-            {hasError && (
-              <Badge variant="destructive" className="flex items-center gap-1" data-testid="badge-error">
-                <AlertCircle className="h-3 w-3" />
-                Error
-              </Badge>
-            )}
           </div>
           <div className="flex items-center gap-1">
             <Button 
@@ -265,6 +382,32 @@ export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeIn
             </Button>
           </div>
         </div>
+
+        {/* Status Badges Section */}
+        {(hasError || hasMetricsError || metrics.isSlow || metrics.isTokenHeavy) && (
+          <div className="px-4 py-2 border-b border-border bg-muted/30">
+            <div className="flex flex-wrap items-center gap-2">
+              {(hasError || hasMetricsError) && (
+                <Badge variant="destructive" className="flex items-center gap-1" data-testid="badge-status-error">
+                  <AlertCircle className="h-3 w-3" />
+                  Error
+                </Badge>
+              )}
+              {metrics.isSlow && (
+                <Badge variant="outline" className="flex items-center gap-1 border-yellow-500 text-yellow-600 dark:text-yellow-400" data-testid="badge-status-slow">
+                  <Timer className="h-3 w-3" />
+                  Slow {metrics.durationMs !== undefined && `(${formatDuration(metrics.durationMs)})`}
+                </Badge>
+              )}
+              {metrics.isTokenHeavy && (
+                <Badge variant="outline" className="flex items-center gap-1 border-orange-500 text-orange-600 dark:text-orange-400" data-testid="badge-status-token-heavy">
+                  <Zap className="h-3 w-3" />
+                  Token Heavy
+                </Badge>
+              )}
+            </div>
+          </div>
+        )}
 
         <ScrollArea className="flex-1">
           <div className="p-4 space-y-4">
@@ -425,6 +568,121 @@ export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeIn
               <>
                 <Separator />
                 <MetadataField label="Order" value={node.order} />
+              </>
+            )}
+
+            {/* Timing Section */}
+            {hasTiming && (
+              <>
+                <Separator />
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Timing
+                  </label>
+                  <div className="mt-2 space-y-2 bg-muted/50 p-3 rounded-md">
+                    {metrics.startTime !== undefined && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-muted-foreground">Start Time:</span>
+                        <span className="text-xs font-mono" data-testid="text-start-time">{formatTimestamp(metrics.startTime)}</span>
+                      </div>
+                    )}
+                    {metrics.endTime !== undefined && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-muted-foreground">End Time:</span>
+                        <span className="text-xs font-mono" data-testid="text-end-time">{formatTimestamp(metrics.endTime)}</span>
+                      </div>
+                    )}
+                    {metrics.durationMs !== undefined && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-muted-foreground">Duration:</span>
+                        <span className={`text-xs font-mono font-semibold ${metrics.isSlow ? 'text-yellow-600 dark:text-yellow-400' : ''}`} data-testid="text-duration">
+                          {formatDuration(metrics.durationMs)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Token Usage Section */}
+            {hasTokenUsage && metrics.tokenUsage && (
+              <>
+                <Separator />
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Zap className="h-3 w-3" />
+                    Token Usage
+                  </label>
+                  <div className="mt-2 space-y-2 bg-muted/50 p-3 rounded-md">
+                    {metrics.tokenUsage.prompt !== undefined && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-muted-foreground">Prompt Tokens:</span>
+                        <span className="text-xs font-mono" data-testid="text-prompt-tokens">{metrics.tokenUsage.prompt.toLocaleString()}</span>
+                      </div>
+                    )}
+                    {metrics.tokenUsage.completion !== undefined && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-muted-foreground">Completion Tokens:</span>
+                        <span className="text-xs font-mono" data-testid="text-completion-tokens">{metrics.tokenUsage.completion.toLocaleString()}</span>
+                      </div>
+                    )}
+                    {metrics.tokenUsage.total !== undefined && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-muted-foreground">Total Tokens:</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-mono font-semibold ${metrics.isTokenHeavy ? 'text-orange-600 dark:text-orange-400' : ''}`} data-testid="text-total-tokens">
+                            {metrics.tokenUsage.total.toLocaleString()}
+                          </span>
+                          {metrics.isTokenHeavy && (
+                            <Badge variant="outline" className="text-xs border-orange-500 text-orange-600 dark:text-orange-400 py-0">
+                              Heavy
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Model Info Section */}
+            {metrics.modelName && (
+              <>
+                <Separator />
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Cpu className="h-3 w-3" />
+                    Model Info
+                  </label>
+                  <div className="mt-2">
+                    <Badge variant="secondary" className="font-mono" data-testid="badge-model-name">
+                      {metrics.modelName}
+                    </Badge>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Metrics Error Section */}
+            {hasMetricsError && (
+              <>
+                <Separator />
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md" data-testid="section-metrics-error">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-destructive mb-1">Metrics Error</p>
+                      {metrics.errorMessage && (
+                        <pre className="text-xs font-mono whitespace-pre-wrap break-words text-destructive/80">
+                          {metrics.errorMessage}
+                        </pre>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </>
             )}
 
@@ -593,26 +851,65 @@ export function NodeInspector({ node, trace, onClose, onNavigateToNode }: NodeIn
 
             <Separator />
 
-            {/* Raw JSON */}
-            <div>
-              <button
-                onClick={() => setIsRawJsonExpanded(!isRawJsonExpanded)}
-                className="flex items-center justify-between w-full text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
-                data-testid="button-toggle-raw-json"
-              >
-                Raw JSON
-                {isRawJsonExpanded ? (
-                  <ChevronUp className="h-4 w-4" />
-                ) : (
-                  <ChevronDown className="h-4 w-4" />
-                )}
-              </button>
-              {isRawJsonExpanded && (
-                <div className="mt-2">
-                  <JSONViewer data={node} />
+            {/* Collapsible Raw Metadata Section */}
+            {node.metadata && Object.keys(node.metadata).length > 0 && (
+              <Collapsible open={isRawMetadataExpanded} onOpenChange={setIsRawMetadataExpanded}>
+                <div className="flex items-center justify-between">
+                  <CollapsibleTrigger asChild>
+                    <button
+                      className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+                      data-testid="button-toggle-raw-metadata"
+                    >
+                      {isRawMetadataExpanded ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                      Raw Metadata
+                    </button>
+                  </CollapsibleTrigger>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleCopyMetadata}
+                    data-testid="button-copy-metadata"
+                    title="Copy metadata JSON"
+                    className="h-7 w-7"
+                  >
+                    {copiedMetadata ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  </Button>
                 </div>
-              )}
-            </div>
+                <CollapsibleContent className="mt-2">
+                  <ScrollArea className="rounded-md border border-border max-h-[300px]">
+                    <pre className="p-3 text-xs font-mono bg-muted/50" data-testid="pre-raw-metadata">
+                      {JSON.stringify(node.metadata, null, 2)}
+                    </pre>
+                  </ScrollArea>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+
+            <Separator />
+
+            {/* Collapsible Raw JSON (Full Node) */}
+            <Collapsible open={isRawJsonExpanded} onOpenChange={setIsRawJsonExpanded}>
+              <CollapsibleTrigger asChild>
+                <button
+                  className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+                  data-testid="button-toggle-raw-json"
+                >
+                  {isRawJsonExpanded ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                  Raw Node JSON
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2">
+                <JSONViewer data={node} />
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         </ScrollArea>
       </div>

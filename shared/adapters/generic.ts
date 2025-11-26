@@ -1,5 +1,8 @@
 import { TraceAdapter } from './index';
-import { TraceRun, TraceNode, NodeType, Step, FieldMapping, ParseResult, KNOWN_STEP_ARRAY_KEYS, LangGraphDetails } from '../models';
+import { TraceRun, TraceNode, NodeType, Step, FieldMapping, ParseResult, KNOWN_STEP_ARRAY_KEYS, LangGraphDetails, NodeMetrics, TokenUsage } from '../models';
+
+const SLOW_THRESHOLD_MS = 3000;
+const HEAVY_TOKEN_THRESHOLD = 2000;
 
 export class GenericAdapter implements TraceAdapter {
   id = 'generic';
@@ -93,6 +96,8 @@ export class GenericAdapter implements TraceAdapter {
           warnings.push(`Step ${index}: No content could be extracted`);
         }
         
+        const metrics = this.extractMetrics(step);
+        
         return {
           id: nodeIds[index],
           type,
@@ -102,7 +107,8 @@ export class GenericAdapter implements TraceAdapter {
           parentId: this.extractParentId(step, index, nodeIds, mapping, toolCallIdToNodeId),
           order: step.order !== undefined ? step.order : index,
           metadata: this.sanitizeMetadata(step),
-          langGraphDetails: Object.keys(langGraphDetails).length > 0 ? langGraphDetails : undefined
+          langGraphDetails: Object.keys(langGraphDetails).length > 0 ? langGraphDetails : undefined,
+          metrics: Object.keys(metrics).length > 0 ? metrics : undefined
         };
       });
 
@@ -512,6 +518,198 @@ export class GenericAdapter implements TraceAdapter {
     }
     
     return undefined;
+  }
+
+  private extractMetrics(step: any): NodeMetrics {
+    const metrics: NodeMetrics = {};
+
+    const startTime = this.extractTimingField(step, ['start_time', 'start', 'started_at', 'begin_time']);
+    const endTime = this.extractTimingField(step, ['end_time', 'end', 'ended_at', 'finish_time']);
+    
+    if (startTime !== undefined) {
+      metrics.startTime = startTime;
+    }
+    if (endTime !== undefined) {
+      metrics.endTime = endTime;
+    }
+
+    const durationFields = ['duration', 'duration_ms', 'execution_time', 'elapsed_ms', 'latency', 'latency_ms'];
+    for (const field of durationFields) {
+      if (step[field] !== undefined && step[field] !== null) {
+        const duration = Number(step[field]);
+        if (!isNaN(duration) && duration >= 0) {
+          metrics.durationMs = duration;
+          break;
+        }
+      }
+    }
+
+    if (metrics.durationMs === undefined && metrics.startTime !== undefined && metrics.endTime !== undefined) {
+      metrics.durationMs = metrics.endTime - metrics.startTime;
+    }
+
+    const tokenUsage = this.extractTokenUsage(step);
+    if (tokenUsage && (tokenUsage.prompt !== undefined || tokenUsage.completion !== undefined || tokenUsage.total !== undefined)) {
+      metrics.tokenUsage = tokenUsage;
+    }
+
+    const modelFields = ['model', 'model_name', 'llm_name', 'model_id', 'modelName', 'modelId'];
+    for (const field of modelFields) {
+      if (step[field] !== undefined && step[field] !== null && typeof step[field] === 'string') {
+        metrics.modelName = step[field];
+        break;
+      }
+    }
+
+    const errorInfo = this.extractErrorInfo(step);
+    if (errorInfo.hasError) {
+      metrics.hasError = true;
+      if (errorInfo.errorMessage) {
+        metrics.errorMessage = errorInfo.errorMessage;
+      }
+    }
+
+    if (metrics.durationMs !== undefined && metrics.durationMs > SLOW_THRESHOLD_MS) {
+      metrics.isSlow = true;
+    }
+
+    if (metrics.tokenUsage?.total !== undefined && metrics.tokenUsage.total > HEAVY_TOKEN_THRESHOLD) {
+      metrics.isTokenHeavy = true;
+    }
+
+    return metrics;
+  }
+
+  private extractTimingField(step: any, fields: string[]): number | undefined {
+    for (const field of fields) {
+      if (step[field] !== undefined && step[field] !== null) {
+        const parsed = this.parseTimestamp(step[field]);
+        if (parsed !== undefined) {
+          return parsed;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private extractTokenUsage(step: any): TokenUsage | undefined {
+    const usage: TokenUsage = {};
+
+    const usageContainers = ['usage', 'token_usage', 'tokens', 'tokenUsage'];
+    let usageObj: any = null;
+    
+    for (const container of usageContainers) {
+      if (step[container] && typeof step[container] === 'object') {
+        usageObj = step[container];
+        break;
+      }
+    }
+
+    if (usageObj) {
+      const promptFields = ['prompt_tokens', 'promptTokens', 'input_tokens', 'inputTokens', 'token_count_input'];
+      for (const field of promptFields) {
+        if (usageObj[field] !== undefined) {
+          const val = Number(usageObj[field]);
+          if (!isNaN(val)) {
+            usage.prompt = val;
+            break;
+          }
+        }
+      }
+
+      const completionFields = ['completion_tokens', 'completionTokens', 'output_tokens', 'outputTokens', 'token_count_output'];
+      for (const field of completionFields) {
+        if (usageObj[field] !== undefined) {
+          const val = Number(usageObj[field]);
+          if (!isNaN(val)) {
+            usage.completion = val;
+            break;
+          }
+        }
+      }
+
+      const totalFields = ['total_tokens', 'totalTokens', 'token_count', 'total'];
+      for (const field of totalFields) {
+        if (usageObj[field] !== undefined) {
+          const val = Number(usageObj[field]);
+          if (!isNaN(val)) {
+            usage.total = val;
+            break;
+          }
+        }
+      }
+    }
+
+    const directPromptFields = ['token_count_input', 'input_tokens', 'prompt_tokens'];
+    for (const field of directPromptFields) {
+      if (usage.prompt === undefined && step[field] !== undefined) {
+        const val = Number(step[field]);
+        if (!isNaN(val)) {
+          usage.prompt = val;
+          break;
+        }
+      }
+    }
+
+    const directCompletionFields = ['token_count_output', 'output_tokens', 'completion_tokens'];
+    for (const field of directCompletionFields) {
+      if (usage.completion === undefined && step[field] !== undefined) {
+        const val = Number(step[field]);
+        if (!isNaN(val)) {
+          usage.completion = val;
+          break;
+        }
+      }
+    }
+
+    const directTotalFields = ['total_tokens', 'token_count'];
+    for (const field of directTotalFields) {
+      if (usage.total === undefined && step[field] !== undefined) {
+        const val = Number(step[field]);
+        if (!isNaN(val)) {
+          usage.total = val;
+          break;
+        }
+      }
+    }
+
+    if (usage.total === undefined && usage.prompt !== undefined && usage.completion !== undefined) {
+      usage.total = usage.prompt + usage.completion;
+    }
+
+    return (usage.prompt !== undefined || usage.completion !== undefined || usage.total !== undefined) 
+      ? usage 
+      : undefined;
+  }
+
+  private extractErrorInfo(step: any): { hasError: boolean; errorMessage?: string } {
+    const errorFields = ['error', 'error_message', 'exception', 'failure', 'errorMessage'];
+    
+    for (const field of errorFields) {
+      if (step[field] !== undefined && step[field] !== null) {
+        const value = step[field];
+        if (typeof value === 'string' && value.length > 0) {
+          return { hasError: true, errorMessage: value };
+        }
+        if (typeof value === 'object' && value !== null) {
+          const msg = value.message || value.msg || value.description || JSON.stringify(value);
+          return { hasError: true, errorMessage: msg };
+        }
+        if (value === true) {
+          return { hasError: true };
+        }
+      }
+    }
+
+    if (step.status === 'error' || step.status === 'failed' || step.status === 'failure') {
+      return { hasError: true, errorMessage: `Status: ${step.status}` };
+    }
+
+    if (step.success === false) {
+      return { hasError: true, errorMessage: 'success: false' };
+    }
+
+    return { hasError: false };
   }
 
   private buildToolCallIdMap(steps: any[], nodeIds: string[]): Map<string, string> {

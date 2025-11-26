@@ -18,13 +18,16 @@ import { CustomTraceNode } from './CustomTraceNode';
 interface TraceGraphProps {
   trace: TraceRun;
   onNodeClick: (node: TraceNode) => void;
+  highlightNodeId?: string;
+  hoveredIndex?: number | null;
+  onHoverIndexChange?: (index: number | null) => void;
 }
 
 const nodeTypes = {
   traceNode: CustomTraceNode,
 };
 
-export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
+export function TraceGraph({ trace, onNodeClick, highlightNodeId, hoveredIndex, onHoverIndexChange }: TraceGraphProps) {
   const { initialNodes, initialEdges } = useMemo(() => {
     const nodes: Node[] = trace.nodes.map((node, index) => {
       const hasParent = node.parentId && trace.nodes.some(n => n.id === node.parentId);
@@ -41,11 +44,21 @@ export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
         yPosition = 100 + (childIndex * 160);
       }
 
+      const isHighlighted = highlightNodeId === node.id;
+      const isDimmed = highlightNodeId !== undefined && highlightNodeId !== node.id;
+
       return {
         id: node.id,
         type: 'traceNode',
         position: { x: xPosition, y: yPosition },
-        data: { ...node, onNodeClick },
+        data: { 
+          ...node, 
+          onNodeClick, 
+          isHighlighted, 
+          isDimmed,
+          nodeIndex: index,
+          onHoverIndexChange,
+        },
       };
     });
 
@@ -73,7 +86,7 @@ export function TraceGraph({ trace, onNodeClick }: TraceGraphProps) {
     });
 
     return { initialNodes: nodes, initialEdges: edges };
-  }, [trace, onNodeClick]);
+  }, [trace, onNodeClick, highlightNodeId, onHoverIndexChange]);
 
   const [nodes, , onNodesChange] = useNodesState(initialNodes);
   const [edges, , onEdgesChange] = useEdgesState(initialEdges);

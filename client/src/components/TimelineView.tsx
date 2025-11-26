@@ -2,11 +2,14 @@ import { TraceRun, TraceNode } from '@shared/models';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { AlertCircle, TrendingDown, Clock, AlertTriangle, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
+import { AlertCircle, TrendingDown, Clock, AlertTriangle, ShieldAlert, ShieldCheck, ShieldQuestion, Timer, Coins } from 'lucide-react';
 
 interface TimelineViewProps {
   trace: TraceRun;
   onNodeClick: (node: TraceNode) => void;
+  hoveredIndex?: number | null;
+  pairedHoveredIndex?: number | null;
+  onHoverIndexChange?: (index: number | null) => void;
 }
 
 const nodeColors: Record<string, { border: string; text: string }> = {
@@ -18,7 +21,7 @@ const nodeColors: Record<string, { border: string; text: string }> = {
   other: { border: 'hsl(var(--node-other))', text: 'hsl(var(--node-other))' },
 };
 
-export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
+export function TimelineView({ trace, onNodeClick, hoveredIndex, pairedHoveredIndex, onHoverIndexChange }: TimelineViewProps) {
   const sortedNodes = [...trace.nodes].sort((a, b) => {
     if (a.timestamp && b.timestamp) {
       return a.timestamp - b.timestamp;
@@ -51,11 +54,27 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
             const hasIssues = issueCount > 0;
             const riskLevel = node.riskLevel;
 
+            const metricsHasError = node.metrics?.hasError;
+            const metricsIsSlow = node.metrics?.isSlow;
+            const metricsIsTokenHeavy = node.metrics?.isTokenHeavy;
+            const metricsDurationMs = node.metrics?.durationMs;
+
+            const isPairedHighlight = pairedHoveredIndex === index;
+            const isHovered = hoveredIndex === index;
+
             return (
-              <div key={node.id} className="flex gap-4 group">
+              <div 
+                key={node.id} 
+                className="flex gap-4 group"
+                onMouseEnter={() => onHoverIndexChange?.(index)}
+                onMouseLeave={() => onHoverIndexChange?.(null)}
+                data-testid={`timeline-item-${index}`}
+              >
                 <div className="flex flex-col items-center">
                   <div 
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold shadow-md"
+                    className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold shadow-md transition-all duration-200 ${
+                      isPairedHighlight ? 'ring-2 ring-primary ring-offset-2 scale-110' : ''
+                    }`}
                     style={{ 
                       backgroundColor: colors.border,
                       color: 'white'
@@ -72,7 +91,9 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                 </div>
 
                 <Card
-                  className="flex-1 p-5 cursor-pointer hover-elevate active-elevate-2 transition-all duration-200"
+                  className={`flex-1 p-5 cursor-pointer hover-elevate active-elevate-2 transition-all duration-200 ${
+                    isPairedHighlight ? 'ring-2 ring-primary/50 shadow-lg' : ''
+                  }`}
                   style={{ borderLeftWidth: '4px', borderLeftColor: colors.border }}
                   onClick={() => onNodeClick(node)}
                   data-testid={`timeline-node-${node.id}`}
@@ -118,6 +139,24 @@ export function TimelineView({ trace, onNodeClick }: TimelineViewProps) {
                           <Badge variant="destructive">
                             <AlertCircle className="h-3 w-3 mr-1" />
                             Error
+                          </Badge>
+                        )}
+                        {metricsHasError && !hasError && (
+                          <Badge variant="destructive" data-testid={`badge-metrics-error-${node.id}`}>
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            Error
+                          </Badge>
+                        )}
+                        {metricsIsSlow && (
+                          <Badge variant="outline" className="text-amber-600 border-amber-600" data-testid={`badge-slow-${node.id}`}>
+                            <Timer className="h-3 w-3 mr-1" />
+                            Slow{metricsDurationMs ? ` (${(metricsDurationMs / 1000).toFixed(1)}s)` : ''}
+                          </Badge>
+                        )}
+                        {metricsIsTokenHeavy && (
+                          <Badge variant="outline" className="text-purple-600 border-purple-600" data-testid={`badge-token-heavy-${node.id}`}>
+                            <Coins className="h-3 w-3 mr-1" />
+                            Heavy tokens
                           </Badge>
                         )}
                       </div>

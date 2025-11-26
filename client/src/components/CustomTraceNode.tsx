@@ -2,10 +2,16 @@ import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { TraceNode } from '@shared/models';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, TrendingDown, AlertTriangle, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
+import { AlertCircle, TrendingDown, AlertTriangle, ShieldAlert, ShieldCheck, ShieldQuestion, Clock, Zap } from 'lucide-react';
 
 interface CustomTraceNodeProps {
-  data: TraceNode & { onNodeClick?: (node: TraceNode) => void };
+  data: TraceNode & { 
+    onNodeClick?: (node: TraceNode) => void;
+    isHighlighted?: boolean;
+    isDimmed?: boolean;
+    nodeIndex?: number;
+    onHoverIndexChange?: (index: number | null) => void;
+  };
 }
 
 const nodeColors = {
@@ -51,17 +57,49 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
   const issueCount = data.issues?.length || 0;
   const hasIssues = issueCount > 0;
   const riskLevel = data.riskLevel;
+  
+  const metricsHasError = data.metrics?.hasError;
+  const isSlow = data.metrics?.isSlow;
+  const isTokenHeavy = data.metrics?.isTokenHeavy;
+  const isHighlighted = data.isHighlighted;
+  const isDimmed = data.isDimmed;
+
+  const getBoxShadow = () => {
+    if (isHighlighted) {
+      return `0 0 0 3px ${colors.border}, 0 0 20px 4px ${colors.border}`;
+    }
+    if (hasError) {
+      return '0 10px 15px -3px rgba(239, 68, 68, 0.3), 0 4px 6px -4px rgba(239, 68, 68, 0.3)';
+    }
+    return undefined;
+  };
+
+  const handleMouseEnter = () => {
+    if (data.nodeIndex !== undefined && data.onHoverIndexChange) {
+      data.onHoverIndexChange(data.nodeIndex);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (data.onHoverIndexChange) {
+      data.onHoverIndexChange(null);
+    }
+  };
 
   return (
     <div
       onClick={() => data.onNodeClick?.(data)}
-      className="rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 cursor-pointer min-w-[220px] max-w-[300px] hover:scale-[1.02]"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className={`rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 cursor-pointer min-w-[220px] max-w-[300px] ${
+        isHighlighted ? 'ring-2 ring-offset-2 ring-offset-background' : ''
+      }`}
       style={{
         backgroundColor: colors.bg,
         borderLeft: `4px solid ${colors.border}`,
-        boxShadow: hasError 
-          ? '0 10px 15px -3px rgba(239, 68, 68, 0.3), 0 4px 6px -4px rgba(239, 68, 68, 0.3)'
-          : undefined
+        boxShadow: getBoxShadow(),
+        opacity: isDimmed ? 0.5 : 1,
+        ...(isHighlighted && { '--tw-ring-color': colors.border } as any),
       }}
       data-testid={`node-${data.id}`}
     >
@@ -76,7 +114,35 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
           >
             {data.type}
           </Badge>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            {metricsHasError && (
+              <Badge 
+                variant="destructive" 
+                className="h-5 px-1.5 py-0 text-[10px] gap-0.5"
+                data-testid={`badge-error-${data.id}`}
+              >
+                <AlertCircle className="h-3 w-3" />
+                error
+              </Badge>
+            )}
+            {isSlow && (
+              <Badge 
+                className="h-5 px-1.5 py-0 text-[10px] gap-0.5 bg-amber-500 text-white border-transparent dark:bg-amber-600"
+                data-testid={`badge-slow-${data.id}`}
+              >
+                <Clock className="h-3 w-3" />
+                slow
+              </Badge>
+            )}
+            {isTokenHeavy && (
+              <Badge 
+                className="h-5 px-1.5 py-0 text-[10px] gap-0.5 bg-violet-500 text-white border-transparent dark:bg-violet-600"
+                data-testid={`badge-tokens-${data.id}`}
+              >
+                <Zap className="h-3 w-3" />
+                tokens
+              </Badge>
+            )}
             {hasIssues && (
               <div className="flex items-center gap-0.5 text-yellow-600" title={`${issueCount} issue${issueCount !== 1 ? 's' : ''}`}>
                 <AlertTriangle className="h-3.5 w-3.5" />
@@ -99,7 +165,7 @@ function CustomTraceNodeComponent({ data }: CustomTraceNodeProps) {
                 <TrendingDown className="h-3.5 w-3.5" />
               </div>
             )}
-            {hasError && (
+            {hasError && !metricsHasError && (
               <div className="flex items-center gap-0.5 text-destructive" title="Error detected">
                 <AlertCircle className="h-3.5 w-3.5" />
               </div>

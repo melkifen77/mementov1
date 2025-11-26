@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { Network, List } from 'lucide-react';
+import { Network, List, RotateCcw, GitCompare } from 'lucide-react';
 import { TraceRun, TraceNode, FieldMapping } from '@shared/models';
 import { GenericAdapter } from '@shared/adapters/generic';
 import { analyzeTrace } from '@shared/analysis/trace-analyzer';
@@ -11,6 +11,8 @@ import { NodeInspector } from '@/components/NodeInspector';
 import { ExportDialog } from '@/components/ExportDialog';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { IssueSummary } from '@/components/IssueSummary';
+import { ReplayController } from '@/components/ReplayController';
+import { CompareView } from '@/components/CompareView';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -19,6 +21,9 @@ export default function Home() {
   const [selectedNode, setSelectedNode] = useState<TraceNode | null>(null);
   const [viewMode, setViewMode] = useState<'graph' | 'timeline'>('graph');
   const [showIssueSummary, setShowIssueSummary] = useState(true);
+  const [replayMode, setReplayMode] = useState(false);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [compareMode, setCompareMode] = useState(false);
   const graphRef = useRef<HTMLDivElement>(null);
 
   const adapter = new GenericAdapter();
@@ -34,13 +39,36 @@ export default function Home() {
   const handleReset = () => {
     setTrace(null);
     setSelectedNode(null);
+    setReplayMode(false);
+    setReplayIndex(0);
+    setCompareMode(false);
+  };
+
+  const handleReplayNodeSelect = useCallback((node: TraceNode) => {
+    setSelectedNode(node);
+  }, []);
+
+  const toggleReplayMode = () => {
+    setReplayMode(prev => !prev);
+    if (!replayMode) {
+      setReplayIndex(0);
+      if (trace && trace.nodes.length > 0) {
+        setSelectedNode(trace.nodes[0]);
+      }
+    }
+  };
+
+  const toggleCompareMode = () => {
+    setCompareMode(prev => !prev);
+    if (!compareMode) {
+      setReplayMode(false);
+    }
   };
 
   const handleNavigateToNode = (nodeId: string) => {
     const targetNode = trace?.nodes.find(n => n.id === nodeId);
     if (targetNode) {
       setSelectedNode(targetNode);
-      // TODO: Scroll to node in graph/timeline view
     }
   };
 
@@ -52,16 +80,21 @@ export default function Home() {
             <Network className="h-6 w-6 text-primary" />
             <h1 className="text-xl font-semibold">Memento</h1>
           </div>
-          {trace && (
+          {trace && !compareMode && (
             <div className="flex items-center gap-1 ml-4 text-sm text-muted-foreground">
               <span className="font-mono">{trace.nodes.length}</span>
               <span>nodes</span>
             </div>
           )}
+          {compareMode && (
+            <div className="flex items-center gap-1 ml-4 text-sm text-muted-foreground">
+              <span>Compare Mode</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
-          {trace && (
+          {(trace || compareMode) && (
             <>
               <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'graph' | 'timeline')}>
                 <TabsList>
@@ -76,7 +109,29 @@ export default function Home() {
                 </TabsList>
               </Tabs>
               
-              <ExportDialog elementRef={graphRef} />
+              <Button
+                variant={compareMode ? "default" : "outline"}
+                onClick={toggleCompareMode}
+                data-testid="button-compare-toggle"
+                className="toggle-elevate"
+              >
+                <GitCompare className="h-4 w-4 mr-2" />
+                Compare
+              </Button>
+              
+              {!compareMode && (
+                <Button
+                  variant={replayMode ? "default" : "outline"}
+                  onClick={toggleReplayMode}
+                  data-testid="button-replay-toggle"
+                  className="toggle-elevate"
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Replay
+                </Button>
+              )}
+              
+              {!compareMode && <ExportDialog elementRef={graphRef} />}
               
               <Button 
                 variant="outline" 
@@ -91,22 +146,38 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden relative">
-        {!trace ? (
+      <main className="flex-1 overflow-hidden relative flex flex-col">
+        {compareMode ? (
+          <CompareView viewMode={viewMode} />
+        ) : !trace ? (
           <UploadZone onUpload={handleUpload} />
         ) : (
-          <div ref={graphRef} className="h-full w-full">
-            {viewMode === 'graph' ? (
-              <ReactFlowProvider>
-                <TraceGraph trace={trace} onNodeClick={setSelectedNode} />
-              </ReactFlowProvider>
-            ) : (
-              <TimelineView trace={trace} onNodeClick={setSelectedNode} />
+          <>
+            {replayMode && (
+              <ReplayController
+                nodes={trace.nodes}
+                currentIndex={replayIndex}
+                onIndexChange={setReplayIndex}
+                onNodeSelect={handleReplayNodeSelect}
+              />
             )}
-          </div>
+            <div ref={graphRef} className="flex-1 w-full">
+              {viewMode === 'graph' ? (
+                <ReactFlowProvider>
+                  <TraceGraph 
+                    trace={trace} 
+                    onNodeClick={setSelectedNode}
+                    highlightNodeId={replayMode ? trace.nodes[replayIndex]?.id : undefined}
+                  />
+                </ReactFlowProvider>
+              ) : (
+                <TimelineView trace={trace} onNodeClick={setSelectedNode} />
+              )}
+            </div>
+          </>
         )}
 
-        {trace && showIssueSummary && (
+        {trace && showIssueSummary && !compareMode && (
           <div className="absolute top-4 right-4 w-72 z-30">
             <IssueSummary 
               trace={trace} 
@@ -115,7 +186,7 @@ export default function Home() {
           </div>
         )}
 
-        {selectedNode && (
+        {selectedNode && !compareMode && (
           <NodeInspector 
             node={selectedNode} 
             trace={trace}

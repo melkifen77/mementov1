@@ -1,0 +1,175 @@
+Prompt for Replit
+
+I’m building an “Agent Trace Visualizer” called Memento. It already:
+	•	Lets me paste JSON traces
+	•	Auto-detects arrays like [{...}, {...}] / { trace: [...] } / { steps: [...] } / { intermediate_steps: [...] }
+	•	Renders them as a simple left-to-right graph/timeline with node types (thought, action, observation, output, other)
+	•	Has a right-side panel that opens when I click a node (currently pretty empty: type, id, content, parent node, raw metadata)
+	•	Has TEST_TRACES.md with a few example traces that already work
+
+I now need you to upgrade this into a useful debugging tool with the following features, in this order of priority:
+
+⸻
+
+1. Smarter schema auto-detection (multiple trace formats)
+
+Goal: I want engineers to be able to drop any reasonable agent trace JSON and get a good graph. Different frameworks (LangChain, LangGraph, Agents SDK, custom Python) all name fields differently, but they share similar ideas.
+
+Requirements
+	1.	Extend the loader so that for each step you try to infer:
+	•	type (one of: thought, action, observation, output, other)
+	•	id (unique id or position index)
+	•	optional parent_id
+	•	content (human readable summary)
+	•	raw (raw object with all fields)
+	2.	Heuristic mapping:
+Use “best effort” string matching on keys. For example:
+	•	If any key includes "thought", "reason", "planner" → type = "thought"
+	•	If any key includes "action", "tool", "call", "function" → type = "action"
+	•	If any key includes "observation", "result", "response", "tool_result" → type = "observation"
+	•	If any key includes "output", "final", "answer" → type = "output"
+	•	Else → type = "other"
+	3.	ID / parent detection (for ordering & nesting):
+	•	Try keys: id, step_id, node_id, uuid
+	•	For parent: parent_id, parent_step_id, parent_node_id
+	•	If nothing exists, fallback to numeric index.
+	•	Still draw a sequential chain even if we have no parent ids.
+	4.	Content field:
+For each node, create a short content string:
+	•	Prefer keys like content, message, text, description
+	•	For action nodes, if there is tool_name, name, or similar + tool_input, build something like:
+"{tool_name}({shortened_input})"
+	•	For observation, if there is result or tool_output, show a truncated JSON string.
+	•	Truncate long content to maybe 140–200 chars with ....
+	5.	Raw metadata:
+Store the full original object in something like raw so we can display it later in the side panel.
+	6.	Be robust:
+	•	If parsing fails, show a clear message instead of crashing React.
+	•	If you get any array of objects, try to map them; don’t be strict.
+
+⸻
+
+2. Rich node metadata in the side panel
+
+When the user clicks on a node, the right panel should show:
+	1.	Top section:
+	•	Type (thought/action/observation/output/other)
+	•	Node ID
+	•	Parent node ID (if any)
+	2.	Core debugging fields (if present in raw):
+Dynamically show rows ONLY if they exist:
+	•	step_name / node_id
+	•	input (full)
+	•	output (full)
+	•	timestamp
+	•	execution_duration_ms
+	•	model_name
+	•	prompt_template_used
+	•	token_count_input
+	•	token_count_output
+	•	success or status
+	•	error_message
+	•	trace_id
+	•	parent_step_id / parent_id
+	3.	Raw JSON section:
+	•	Collapsible block named “Raw metadata”
+	•	Pretty-printed JSON of the full node object (e.g. JSON.stringify(raw, null, 2))
+	4.	Make sure the side panel never breaks if some fields aren’t there — just don’t show those rows.
+
+UI: clean and minimal, e.g. label on the left, value on the right. This side panel alone should make the tool feel like a proper debugging panel.
+
+⸻
+
+3. Node badges (errors / slow steps / token-heavy)
+
+I want the graph itself to visually show “what’s suspicious” at a glance.
+
+Logic
+
+For each node, derive simple flags:
+	•	hasError → if error_message exists or status/success looks like a failure
+	•	Check keys: error, error_message, status === "error", success === false, etc.
+	•	isSlow → if execution_duration_ms exists and is above some threshold (e.g. 2000 ms)
+	•	For now, hardcode SLOW_THRESHOLD_MS = 2000
+	•	isTokenHeavy → if token_count_input + token_count_output or any token_count > threshold
+	•	e.g. HEAVY_TOKEN_THRESHOLD = 2000
+
+UI
+	•	On each node card, add small badges in the top-right:
+	•	Error → small red pill with “error”
+	•	Slow → yellow pill “slow”
+	•	Token-heavy → purple pill “tokens”
+
+If multiple apply, show multiple badges horizontally.
+
+Make sure this works both in graph view and timeline view.
+
+⸻
+
+4. Simple replay mode (step-through playback)
+
+I need a very lightweight “replay” of the trace. No actual LLM calls, just stepping through the nodes.
+
+Requirements
+	1.	Add a Replay bar above the graph or at the bottom with:
+	•	Play/Pause button
+	•	Next step
+	•	Previous step
+	•	A display like Step 3 / 7
+	2.	Behavior:
+	•	When Replay mode is active, visually dim all nodes
+	•	Highlight the “current” node (e.g. with a stronger border or glow)
+	•	Automatically open its metadata in the right panel
+	•	The Next / Previous buttons move the index along the ordered nodes
+	•	Play just auto-advances every X ms (e.g. 800–1200 ms) until the end
+	3.	Use the same sequence order as we use for drawing the graph (respect parent_id when available, otherwise index).
+	4.	If the user clicks a node manually while replay is paused, make that node the current one.
+
+This doesn’t need to be perfect; it just needs to feel like a “step debugger” so people can visually walk through the agent’s reasoning.
+
+⸻
+
+5. Side-by-side comparison for success vs failure traces
+
+I’d like a very simple “diff” experience between two traces. Minimal but useful.
+
+UX
+	•	On the main page, allow the user to load two traces:
+	•	Either via two text areas, or a toggle “Add second trace”
+	•	When two traces are loaded, show:
+	•	Left panel: Trace A
+	•	Right panel: Trace B
+	•	Each side still has its own graph and side panel.
+
+Data alignment (simple version)
+
+We don’t need a sophisticated diff engine right now. Just:
+	•	Align nodes by index:
+	•	Node 1 left vs Node 1 right
+	•	Node 2 left vs Node 2 right
+	•	On hover over a node on the left, lightly highlight the same index node on the right (if it exists), and vice versa.
+
+Later (optional) but plan for:
+
+Just design the code so we can later detect mismatches (type differences, error vs no error, token differences) and mark them, but you don’t need to implement deep diff logic yet. Simple index pairing is enough for now.
+
+⸻
+
+6. General polish & robustness
+	•	Keep using the existing tech stack (React + TS + Vite, or whatever you created earlier). If you need to refactor components, do it cleanly.
+	•	Make sure:
+	•	Malformed JSON → shows a clear error message, not a crash.
+	•	Huge JSON → still loads, maybe by truncating displayed text but keeping raw in the panel.
+	•	Keep the visual design minimal and readable. I don’t need animations or fancy theming; clarity > aesthetics.
+
+⸻
+
+Summary of what I want you to deliver
+	1.	Improved JSON loader with heuristic schema mapping (type, id, parent_id, content, raw).
+	2.	Rich right-side metadata panel using the common debugging fields + raw JSON.
+	3.	Node badges for error/slow/token-heavy based on simple rules.
+	4.	Replay mode with step-through + play/pause + highlighting of current node.
+	5.	Basic side-by-side trace compare (two traces, two graphs, simple index-based pairing).
+	6.	Defensive coding so unknown or partial traces still show something useful.
+
+Please implement all of this, wire it into the existing UI, and keep the code organized so it’s easy to extend later for more advanced analysis.
