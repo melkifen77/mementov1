@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "functions": {
     "server/index-prod.ts": {
-      "runtime": "@vercel/node"
+      "runtime": "@vercel/node@3.0.0"
     }
   },
   "routes": [
