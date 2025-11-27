@@ -666,34 +666,80 @@ export function detectContradictions(nodes: TraceNode[]): TraceIssue[] {
 // ============================================================================
 
 /**
- * Risk scoring rules:
- * - HIGH: Any unhandled error (error nodes present) OR critical issues (guessing_after_error, commit_after_empty)
- * - MEDIUM: Suspicious transitions, loops, missing observations
- * - LOW: Clean trace with no issues
+ * CONSISTENT RISK SCORING MODEL
+ * Applied identically across all trace formats.
+ * 
+ * LOW:
+ * - No errors
+ * - No missing required nodes
+ * - No suspicious transitions
+ * 
+ * MEDIUM:
+ * - Exactly 1 error (deduplicated)
+ * - OR suspicious transition
+ * - OR minor structural issues
+ * 
+ * HIGH:
+ * - 2+ errors (deduplicated)
+ * - OR missing critical nodes:
+ *   - action without observation
+ *   - missing final output
+ *   - abnormal node jumps
+ * - OR critical behavioral issues (guessing_after_error, commit_after_empty)
  */
+
+export interface StructuralAnalysis {
+  hasMissingFinalOutput: boolean;
+  hasActionWithoutObservation: boolean;
+  hasAbnormalJump: boolean;
+  deduplicatedErrorCount: number;
+}
 
 export function calculateRiskLevel(
   issues: TraceIssue[], 
-  errorNodeCount: number = 0
+  errorNodeCount: number = 0,
+  structuralAnalysis?: StructuralAnalysis
 ): { level: RiskLevel; explanation: string } {
-  // HIGH risk: Any error nodes present OR critical behavioral issues
-  const criticalIssues = ['guessing_after_error', 'commit_after_empty', 'unhandled_error', 'error_ignored'];
-  const hasCriticalIssue = issues.some(i => criticalIssues.includes(i.type));
+  const struct = structuralAnalysis || {
+    hasMissingFinalOutput: false,
+    hasActionWithoutObservation: false,
+    hasAbnormalJump: false,
+    deduplicatedErrorCount: errorNodeCount
+  };
   
-  if (errorNodeCount > 0 || hasCriticalIssue) {
+  const dedupedErrors = struct.deduplicatedErrorCount;
+  
+  // Critical behavioral issues - always HIGH
+  const criticalIssueTypes = ['guessing_after_error', 'commit_after_empty'];
+  const hasCriticalBehavior = issues.some(i => criticalIssueTypes.includes(i.type));
+  
+  // Structural problems - HIGH
+  const hasStructuralProblem = struct.hasMissingFinalOutput || 
+                               struct.hasActionWithoutObservation ||
+                               struct.hasAbnormalJump;
+  
+  // HIGH RISK: 2+ errors OR critical behaviors OR structural problems
+  if (dedupedErrors >= 2 || hasCriticalBehavior || hasStructuralProblem) {
     const reasons: string[] = [];
-    if (errorNodeCount > 0) {
-      reasons.push(`${errorNodeCount} error(s) detected`);
+    
+    if (dedupedErrors >= 2) {
+      reasons.push(`${dedupedErrors} unique error(s) detected`);
     }
+    if (struct.hasMissingFinalOutput) {
+      reasons.push('missing final output');
+    }
+    if (struct.hasActionWithoutObservation) {
+      reasons.push('action without observation');
+    }
+    if (struct.hasAbnormalJump) {
+      reasons.push('abnormal node transition');
+    }
+    
     const guessingCount = issues.filter(i => i.type === 'guessing_after_error').length;
     const commitEmptyCount = issues.filter(i => i.type === 'commit_after_empty').length;
-    const unhandledCount = issues.filter(i => i.type === 'unhandled_error').length;
-    const errorIgnoredCount = issues.filter(i => i.type === 'error_ignored').length;
     
     if (guessingCount > 0) reasons.push(`${guessingCount} case(s) of guessing after error`);
     if (commitEmptyCount > 0) reasons.push(`${commitEmptyCount} commit(s) with empty data`);
-    if (unhandledCount > 0) reasons.push(`${unhandledCount} unhandled error(s)`);
-    if (errorIgnoredCount > 0) reasons.push(`${errorIgnoredCount} error(s) ignored`);
     
     return { 
       level: 'high', 
@@ -701,19 +747,28 @@ export function calculateRiskLevel(
     };
   }
   
-  // MEDIUM risk: Suspicious transitions, loops, missing observations
-  const mediumIssues = ['suspicious_transition', 'loop', 'missing_observation'];
-  const hasMediumIssue = issues.some(i => mediumIssues.includes(i.type));
+  // MEDIUM RISK: Exactly 1 error OR suspicious transitions/loops/missing observations
+  const mediumIssueTypes = ['suspicious_transition', 'loop', 'missing_observation', 'unhandled_error', 'error_ignored'];
+  const hasMediumIssue = issues.some(i => mediumIssueTypes.includes(i.type));
   
-  if (hasMediumIssue) {
+  if (dedupedErrors === 1 || hasMediumIssue) {
     const reasons: string[] = [];
+    
+    if (dedupedErrors === 1) {
+      reasons.push('1 error detected');
+    }
+    
     const loopCount = issues.filter(i => i.type === 'loop').length;
     const missingObsCount = issues.filter(i => i.type === 'missing_observation').length;
     const suspiciousCount = issues.filter(i => i.type === 'suspicious_transition').length;
+    const unhandledCount = issues.filter(i => i.type === 'unhandled_error').length;
+    const errorIgnoredCount = issues.filter(i => i.type === 'error_ignored').length;
     
     if (loopCount > 0) reasons.push(`${loopCount} loop(s) detected`);
     if (missingObsCount > 0) reasons.push(`${missingObsCount} missing observation(s)`);
     if (suspiciousCount > 0) reasons.push(`${suspiciousCount} suspicious transition(s)`);
+    if (unhandledCount > 0) reasons.push(`${unhandledCount} unhandled error(s)`);
+    if (errorIgnoredCount > 0) reasons.push(`${errorIgnoredCount} error(s) ignored`);
     
     return { 
       level: 'medium', 
@@ -721,7 +776,7 @@ export function calculateRiskLevel(
     };
   }
   
-  // LOW risk: Clean trace or minor issues only
+  // LOW RISK: Clean trace or minor issues only
   if (issues.length === 0) {
     return { level: 'low', explanation: 'No issues detected in this trace.' };
   }
@@ -733,6 +788,169 @@ export function calculateRiskLevel(
 }
 
 // ============================================================================
+// ERROR DEDUPLICATION
+// ============================================================================
+
+/**
+ * Deduplicate errors by extracting unique error signatures
+ * Same error propagated to multiple nodes counts as one
+ */
+function extractErrorSignature(node: TraceNode): string | null {
+  const metadata = node.metadata || {};
+  const content = node.content || '';
+  
+  // Extract error message from various sources
+  const errorMessage = 
+    metadata.error_message ||
+    metadata.errorMessage ||
+    metadata.exception?.message ||
+    (typeof metadata.error === 'string' ? metadata.error : null) ||
+    (typeof metadata.exception === 'string' ? metadata.exception : null) ||
+    metadata.raw?.error_message ||
+    metadata.raw?.exception?.message ||
+    null;
+  
+  if (errorMessage) {
+    // Normalize the error message for comparison
+    return errorMessage.toLowerCase().trim().replace(/\s+/g, ' ');
+  }
+  
+  // Check for error patterns in content
+  const errorMatch = content.match(/\b(error|exception|failed|timeout):\s*(.{10,100})/i);
+  if (errorMatch) {
+    return errorMatch[0].toLowerCase().trim();
+  }
+  
+  // Check for status-based errors
+  if (metadata.status === 'error' || metadata.status === 'failed') {
+    return `status:${metadata.status}`;
+  }
+  
+  // Use error type if available
+  if (metadata.error_type) {
+    return `type:${String(metadata.error_type).toLowerCase()}`;
+  }
+  
+  // Fallback to node ID if we know there's an error but can't extract signature
+  if (hasErrorIndicators(node)) {
+    return `node:${node.id}`;
+  }
+  
+  return null;
+}
+
+function deduplicateErrors(nodes: TraceNode[], labels: Map<string, StepLabels>): number {
+  const errorSignatures = new Set<string>();
+  
+  for (const node of nodes) {
+    const nodeLabels = labels.get(node.id);
+    
+    // Check if this node has errors
+    if (nodeLabels?.isErrorObservation || hasErrorIndicators(node)) {
+      const signature = extractErrorSignature(node);
+      if (signature) {
+        errorSignatures.add(signature);
+      } else {
+        // Can't extract signature, count as unique
+        errorSignatures.add(`fallback:${node.id}`);
+      }
+    }
+  }
+  
+  return errorSignatures.size;
+}
+
+// ============================================================================
+// STRUCTURAL ANALYSIS
+// ============================================================================
+
+/**
+ * Analyze trace structure for critical issues
+ * Applied consistently across all trace formats
+ */
+function analyzeStructure(nodes: TraceNode[], labels: Map<string, StepLabels>): StructuralAnalysis {
+  let hasMissingFinalOutput = false;
+  let hasActionWithoutObservation = false;
+  let hasAbnormalJump = false;
+  
+  // Check for final output
+  const outputNodes = nodes.filter(n => n.type === 'output');
+  if (outputNodes.length === 0 && nodes.length > 0) {
+    // No final output - check if trace is complete
+    const lastNode = nodes[nodes.length - 1];
+    // If the trace ends with an action or thought, it's incomplete
+    if (lastNode.type === 'action' || lastNode.type === 'thought') {
+      hasMissingFinalOutput = true;
+    }
+  }
+  
+  // Check for action → observation pairing
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    
+    if (node.type === 'action') {
+      const nodeLabels = labels.get(node.id);
+      const toolName = nodeLabels?.toolName;
+      
+      // Skip actions without tool names (might be planning steps)
+      if (!toolName || toolName === 'unknown') continue;
+      
+      // Look for observation in next 2 steps
+      let hasObservation = false;
+      for (let j = i + 1; j < Math.min(i + 3, nodes.length); j++) {
+        if (nodes[j].type === 'observation') {
+          hasObservation = true;
+          break;
+        }
+        // If we hit another action first, the previous action has no observation
+        if (nodes[j].type === 'action') {
+          break;
+        }
+        // If we hit an output, the action went straight to output without observation
+        if (nodes[j].type === 'output') {
+          break;
+        }
+      }
+      
+      if (!hasObservation) {
+        // Check if the trace ends right after this action
+        const isLastActionInTrace = i === nodes.length - 1 || 
+          (i === nodes.length - 2 && nodes[nodes.length - 1].type === 'output');
+        
+        if (isLastActionInTrace) {
+          hasActionWithoutObservation = true;
+        }
+      }
+    }
+  }
+  
+  // Check for abnormal jumps (only flag truly abnormal patterns)
+  // e.g., multiple consecutive observations without actions
+  let consecutiveObservations = 0;
+  for (const node of nodes) {
+    if (node.type === 'observation') {
+      consecutiveObservations++;
+      if (consecutiveObservations >= 3) {
+        hasAbnormalJump = true;
+        break;
+      }
+    } else {
+      consecutiveObservations = 0;
+    }
+  }
+  
+  // Get deduplicated error count
+  const deduplicatedErrorCount = deduplicateErrors(nodes, labels);
+  
+  return {
+    hasMissingFinalOutput,
+    hasActionWithoutObservation,
+    hasAbnormalJump,
+    deduplicatedErrorCount
+  };
+}
+
+// ============================================================================
 // SUMMARY & STATS
 // ============================================================================
 
@@ -740,7 +958,9 @@ export interface TraceStats {
   totalNodes: number;
   totalActions: number;
   totalErrors: number;
+  deduplicatedErrors: number;
   issuesByType: Record<IssueType, number>;
+  structuralAnalysis: StructuralAnalysis;
 }
 
 export function summarizeIssues(issues: TraceIssue[]): Record<IssueType, number> {
@@ -806,11 +1026,16 @@ export function computeTraceStats(nodes: TraceNode[], labels: Map<string, StepLa
     }
   }
   
+  // Get structural analysis with error deduplication
+  const structuralAnalysis = analyzeStructure(nodes, labels);
+  
   return {
     totalNodes: nodes.length,
     totalActions: nodes.filter(n => n.type === 'action').length,
     totalErrors,
-    issuesByType: summarizeIssues(issues)
+    deduplicatedErrors: structuralAnalysis.deduplicatedErrorCount,
+    issuesByType: summarizeIssues(issues),
+    structuralAnalysis
   };
 }
 
@@ -858,11 +1083,15 @@ export function analyzeTrace(trace: TraceRun): TraceRun & { stats?: TraceStats }
     issues: nodeIssueMap.get(node.id) || []
   }));
   
-  // Step 4: Compute stats first (need error count for risk calculation)
+  // Step 4: Compute stats with structural analysis
   const stats = computeTraceStats(nodes, labels, allIssues);
   
-  // Step 5: Calculate risk level with error count
-  const { level, explanation } = calculateRiskLevel(allIssues, stats.totalErrors);
+  // Step 5: Calculate risk level using structural analysis (with error deduplication)
+  const { level, explanation } = calculateRiskLevel(
+    allIssues, 
+    stats.totalErrors,
+    stats.structuralAnalysis
+  );
   
   // Attach risk level to output nodes
   const outputNodes = analyzedNodes.filter(n => n.type === 'output');

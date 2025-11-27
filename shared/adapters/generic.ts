@@ -53,7 +53,9 @@ export class GenericAdapter implements TraceAdapter {
         }
       }
 
-      const { steps: rawSteps, arrayPath, detectedFormat } = this.findStepArray(raw, mapping?.stepsPath);
+      // STRICT FORMAT DETECTION - Priority order: LangGraph → LangChain → Array → Generic
+      const detectedFormat = this.detectFormatStrict(raw);
+      const { steps: rawSteps, arrayPath } = this.findStepArrayForFormat(raw, detectedFormat, mapping?.stepsPath);
       
       if (!rawSteps || rawSteps.length === 0) {
         const searchedKeys = KNOWN_STEP_ARRAY_KEYS.join(', ');
@@ -160,76 +162,208 @@ export class GenericAdapter implements TraceAdapter {
     }
   }
 
-  private findStepArray(raw: any, customPath?: string): { 
+  /**
+   * STRICT FORMAT DETECTION
+   * Priority order: LangGraph → LangChain → OpenAI → Array → Generic
+   * 
+   * This runs BEFORE step extraction to ensure consistent detection.
+   */
+  private detectFormatStrict(raw: any): string {
+    // 1. Check for LangGraph markers (highest priority)
+    if (this.isLangGraphFormat(raw)) {
+      return 'langgraph';
+    }
+    
+    // 2. Check for LangChain markers
+    if (this.isLangChainFormat(raw)) {
+      return 'langchain';
+    }
+    
+    // 3. Check for OpenAI format
+    if (this.isOpenAIFormat(raw)) {
+      return 'openai';
+    }
+    
+    // 4. Check for array of steps
+    if (Array.isArray(raw)) {
+      return this.detectArrayFormat(raw);
+    }
+    
+    // 5. Generic object fallback
+    return 'generic';
+  }
+
+  private isLangGraphFormat(raw: any): boolean {
+    if (typeof raw !== 'object' || raw === null) return false;
+    
+    // LangGraph structural markers
+    if (raw.langgraph_version !== undefined) return true;
+    if (raw.graph_id !== undefined) return true;
+    if (raw.thread_id !== undefined && raw.checkpoint !== undefined) return true;
+    
+    // Check for events with node/langgraph markers
+    const events = raw.events || raw.messages || raw.runs;
+    if (Array.isArray(events) && events.length > 0) {
+      const hasLangGraphEvent = events.some((e: any) => 
+        e?.node !== undefined || 
+        e?.langgraph_node !== undefined ||
+        e?.graph_id !== undefined ||
+        e?.checkpoint !== undefined
+      );
+      if (hasLangGraphEvent) return true;
+    }
+    
+    return false;
+  }
+
+  private isLangChainFormat(raw: any): boolean {
+    if (typeof raw !== 'object' || raw === null) return false;
+    
+    // LangChain structural markers
+    if (raw.langchain_version !== undefined) return true;
+    if (raw.lc_id !== undefined) return true;
+    
+    // Check for intermediate_steps (most common LangChain pattern)
+    if (Array.isArray(raw.intermediate_steps) && raw.intermediate_steps.length > 0) {
+      return true;
+    }
+    
+    // Check for structured tool_calls with LangChain patterns
+    if (Array.isArray(raw.steps)) {
+      const hasLangChainStructure = raw.steps.some((s: any) =>
+        (s?.action !== undefined && s?.tool_input !== undefined) ||
+        (s?.observation !== undefined) ||
+        (s?.thought !== undefined && s?.action !== undefined)
+      );
+      if (hasLangChainStructure) return true;
+    }
+    
+    // Check for LangChain output patterns
+    if (raw.output !== undefined && (raw.intermediate_steps !== undefined || raw.steps !== undefined)) {
+      return true;
+    }
+    
+    // Check for root-level array with LangChain schema
+    if (Array.isArray(raw)) {
+      return this.detectArrayFormat(raw) === 'langchain';
+    }
+    
+    return false;
+  }
+
+  private isOpenAIFormat(raw: any): boolean {
+    if (typeof raw !== 'object' || raw === null) return false;
+    
+    // OpenAI API response markers
+    if (raw.choices !== undefined) return true;
+    if (raw.model?.startsWith('gpt')) return true;
+    if (Array.isArray(raw.tool_calls) && raw.tool_calls.length > 0) {
+      const hasOpenAIToolCall = raw.tool_calls.some((tc: any) =>
+        tc?.id !== undefined && tc?.function !== undefined
+      );
+      if (hasOpenAIToolCall) return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Find step array based on already-detected format
+   */
+  private findStepArrayForFormat(raw: any, format: string, customPath?: string): { 
     steps: any[] | null; 
     arrayPath?: string;
-    detectedFormat?: string;
   } {
     if (customPath) {
       const customSteps = this.getNestedValue(raw, customPath);
       if (Array.isArray(customSteps)) {
-        return { steps: customSteps, arrayPath: customPath, detectedFormat: 'custom' };
+        return { steps: customSteps, arrayPath: customPath };
       }
     }
 
     if (Array.isArray(raw)) {
-      // Detect format based on step schema patterns
-      const format = this.detectArrayFormat(raw);
-      return { steps: raw, arrayPath: 'root', detectedFormat: format };
+      return { steps: raw, arrayPath: 'root' };
     }
 
     if (typeof raw !== 'object' || raw === null) {
       return { steps: null };
     }
 
-    // Priority: Check for LangChain intermediate_steps FIRST (before generic 'steps')
-    // LangChain traces often have both 'steps' (with just initial thought) and 
-    // 'intermediate_steps' (with the actual action/observation pairs)
-    if (Array.isArray(raw.intermediate_steps) && raw.intermediate_steps.length > 0) {
-      return { steps: raw.intermediate_steps, arrayPath: 'intermediate_steps', detectedFormat: 'langchain' };
+    // Format-specific step array extraction
+    switch (format) {
+      case 'langchain':
+        // LangChain: prioritize intermediate_steps
+        if (Array.isArray(raw.intermediate_steps) && raw.intermediate_steps.length > 0) {
+          return { steps: raw.intermediate_steps, arrayPath: 'intermediate_steps' };
+        }
+        if (Array.isArray(raw.steps) && raw.steps.length > 0) {
+          return { steps: raw.steps, arrayPath: 'steps' };
+        }
+        break;
+        
+      case 'langgraph':
+        // LangGraph: prioritize events or messages
+        if (Array.isArray(raw.events) && raw.events.length > 0) {
+          return { steps: raw.events, arrayPath: 'events' };
+        }
+        if (Array.isArray(raw.messages) && raw.messages.length > 0) {
+          return { steps: raw.messages, arrayPath: 'messages' };
+        }
+        if (Array.isArray(raw.runs) && raw.runs.length > 0) {
+          return { steps: raw.runs, arrayPath: 'runs' };
+        }
+        break;
+        
+      case 'openai':
+        // OpenAI: look for tool_calls or messages
+        if (Array.isArray(raw.tool_calls) && raw.tool_calls.length > 0) {
+          return { steps: raw.tool_calls, arrayPath: 'tool_calls' };
+        }
+        if (Array.isArray(raw.messages) && raw.messages.length > 0) {
+          return { steps: raw.messages, arrayPath: 'messages' };
+        }
+        break;
     }
 
+    // Generic fallback - search known keys
     for (const key of KNOWN_STEP_ARRAY_KEYS) {
       if (Array.isArray(raw[key]) && raw[key].length > 0) {
-        let format = 'generic';
-        if (key === 'intermediate_steps') format = 'langchain';
-        if (key === 'events' || key === 'messages') format = 'langgraph';
-        if (key === 'tool_calls') format = 'openai';
-        
-        return { steps: raw[key], arrayPath: key, detectedFormat: format };
+        return { steps: raw[key], arrayPath: key };
       }
     }
 
+    // Search for step-like keys
     for (const key of Object.keys(raw)) {
       if (key.toLowerCase().includes('step') || 
           key.toLowerCase().includes('trace') ||
           key.toLowerCase().includes('event') ||
           key.toLowerCase().includes('message')) {
         if (Array.isArray(raw[key]) && raw[key].length > 0) {
-          return { steps: raw[key], arrayPath: key, detectedFormat: 'detected' };
+          return { steps: raw[key], arrayPath: key };
         }
       }
     }
 
+    // Nested search
     for (const key of KNOWN_STEP_ARRAY_KEYS) {
       for (const outerKey of Object.keys(raw)) {
         const nested = raw[outerKey];
         if (nested && typeof nested === 'object' && Array.isArray(nested[key])) {
           return { 
             steps: nested[key], 
-            arrayPath: `${outerKey}.${key}`, 
-            detectedFormat: 'nested' 
+            arrayPath: `${outerKey}.${key}`
           };
         }
       }
     }
 
+    // Fallback: find largest array
     const allArrays = this.findAllArrays(raw, '', 3);
     if (allArrays.length > 0) {
       const sorted = allArrays.sort((a, b) => b.items.length - a.items.length);
       const best = sorted[0];
       if (best.items.length > 0 && typeof best.items[0] === 'object') {
-        return { steps: best.items, arrayPath: best.path, detectedFormat: 'fallback' };
+        return { steps: best.items, arrayPath: best.path };
       }
     }
 
@@ -1057,13 +1191,25 @@ export class GenericAdapter implements TraceAdapter {
     return nodeIds[index - 1] || null;
   }
 
+  /**
+   * DETERMINISTIC NODE TYPE DETECTION
+   * 
+   * Normalization rules (applied consistently across all formats):
+   * - thought: reasoning, chain-of-thought, planning, thinking
+   * - action: tool call, function call, external API invocation
+   * - observation: tool result, function return, structured data response
+   * - output: final answer, completion, user-facing response
+   * - system: logs, errors, internal messages
+   */
   private detectType(step: any, mapping?: FieldMapping): NodeType {
+    // Priority 1: Explicit type field with exact match
     if (step.type === 'action') return 'action';
     if (step.type === 'observation') return 'observation';
     if (step.type === 'thought') return 'thought';
     if (step.type === 'output') return 'output';
     if (step.type === 'system') return 'system';
     
+    // Priority 2: Custom mapping
     if (mapping?.typeField) {
       const customType = this.getNestedValue(step, mapping.typeField);
       if (customType) {
@@ -1072,6 +1218,11 @@ export class GenericAdapter implements TraceAdapter {
       }
     }
 
+    // Priority 3: LangChain internal markers (from expandSteps)
+    if (step._langChainAction) return 'action';
+    if (step._langChainObservation) return 'observation';
+
+    // Priority 4: Original key from sub-step expansion
     if (step._originalKey) {
       const key = step._originalKey.toLowerCase();
       if (key === 'thought' || key === 'thinking' || key === 'reasoning') return 'thought';
@@ -1080,60 +1231,73 @@ export class GenericAdapter implements TraceAdapter {
       if (key === 'output' || key === 'final_answer' || key === 'answer') return 'output';
     }
 
+    // Priority 5: OpenAI/Anthropic role-based detection
     if (step.role === 'tool' || step.role === 'function') {
       return 'observation';
     }
-
     if (step.role === 'system') {
       return 'system';
     }
-
     if (step.tool_call_id && step.content !== undefined) {
       return 'observation';
     }
 
+    // Priority 6: Normalize string type values
     if (step.type !== undefined && step.type !== null) {
       const normalized = this.normalizeType(String(step.type).toLowerCase());
       if (normalized !== 'other') return normalized;
     }
 
-    if (step.tool || step.tool_name || step.function_call || step.function || 
-        step.action || step.tool_input || step.tool_calls) {
+    // Priority 7: LangChain schema detection
+    // ACTION: has tool/function call indicators
+    if (step.action !== undefined && step.tool_input !== undefined) {
+      return 'action';
+    }
+    if (step.tool || step.tool_name || step.function_call || step.function || step.tool_calls) {
       return 'action';
     }
 
-    if (step.observation !== undefined || step.result !== undefined || 
-        step.response !== undefined || step.tool_output !== undefined ||
-        step.return_value !== undefined) {
+    // OBSERVATION: has result/response data
+    if (step.observation !== undefined) {
+      return 'observation';
+    }
+    if (step.result !== undefined || step.response !== undefined || 
+        step.tool_output !== undefined || step.return_value !== undefined) {
       return 'observation';
     }
 
+    // OUTPUT: final answer markers
     if (step.final_answer !== undefined || step.answer !== undefined || 
         step.completion !== undefined || step.output_text !== undefined ||
         step.is_final === true || step.finished === true) {
       return 'output';
     }
-
-    if (step.role === 'assistant') {
-      const content = String(step.content || step.text || step.message || '').toLowerCase();
-      
-      if (content.match(/\b(plan|planning|checking|analyzing|considering|thinking|let me|i will|i'll|first|next|then)\b/i)) {
-        return 'thought';
+    
+    // Special case: LangChain output field at step level (not top-level)
+    if (step.output !== undefined && step._originalIndex !== undefined) {
+      // Check if this looks like a final output vs an observation
+      const outputContent = String(step.output || '').toLowerCase();
+      if (outputContent.match(/\b(final|answer|conclusion|result|here\s+is|here\s+are)\b/i)) {
+        return 'output';
       }
-      
+      // If it's structured data, it's likely an observation
+      if (typeof step.output === 'object' && step.output !== null) {
+        return 'observation';
+      }
+    }
+
+    // Priority 8: Role-based with content analysis
+    if (step.role === 'assistant') {
+      // Check for tool calls first
       if (step.tool_calls || step.function_call) {
         return 'action';
       }
+      
+      // Default assistant messages are thoughts
+      return 'thought';
     }
 
-    if (step.role === 'tool' || step.role === 'function') {
-      return 'observation';
-    }
-
-    if (step.role === 'system') {
-      return 'system';
-    }
-
+    // Priority 9: Check additional type fields
     const typeFields = ['kind', 'nodeType', 'node_type', 'step_type', 'event_type', 'category'];
     for (const field of typeFields) {
       if (step[field]) {
@@ -1142,22 +1306,32 @@ export class GenericAdapter implements TraceAdapter {
       }
     }
 
+    // Priority 10: Content-based heuristics (last resort)
     const content = String(step.content || step.text || step.message || '').toLowerCase();
     
-    if (content.match(/\b(error|failed|exception|traceback)\b/i)) {
+    // Error content → system
+    if (content.match(/\b(error|failed|exception|traceback|stack\s*trace)\b/i)) {
       return 'system';
     }
     
+    // Action indicators
     if (content.match(/\b(calling|executing|running|invoking|fetching|searching|querying)\s+\w+/i)) {
       return 'action';
     }
     
+    // Observation indicators
     if (content.match(/\b(returned|received|got|found|result|response)\s*:/i)) {
       return 'observation';
     }
     
-    if (content.match(/\b(final\s+answer|in\s+conclusion|therefore|the\s+answer\s+is)\b/i)) {
+    // Output indicators
+    if (content.match(/\b(final\s+answer|in\s+conclusion|therefore|the\s+answer\s+is|here\s+is\s+the|here\s+are\s+the)\b/i)) {
       return 'output';
+    }
+    
+    // Thought indicators
+    if (content.match(/\b(i\s+need\s+to|let\s+me|i\s+will|i'll|thinking|planning|considering|analyzing)\b/i)) {
+      return 'thought';
     }
     
     return 'other';
@@ -1300,10 +1474,23 @@ export class GenericAdapter implements TraceAdapter {
   private sanitizeMetadata(step: any): any {
     try {
       const sanitized = { ...step };
-      delete sanitized._originalIndex;
-      delete sanitized._tupleIndex;
-      delete sanitized._originalKey;
-      delete sanitized._parentStepId;
+      // Remove all internal/private fields (prefixed with underscore)
+      const internalFields = [
+        '_originalIndex',
+        '_tupleIndex', 
+        '_originalKey',
+        '_parentStepId',
+        '_globalIndex',
+        '_linkedObservationId',
+        '_linkedActionId',
+        '_langChainAction',
+        '_langChainObservation'
+      ];
+      
+      for (const field of internalFields) {
+        delete sanitized[field];
+      }
+      
       return JSON.parse(JSON.stringify(sanitized));
     } catch {
       return {};

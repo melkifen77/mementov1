@@ -1,0 +1,162 @@
+✅ MEMENTO – LOADER & ANALYSIS FIX REPORT (FOR REPLIT)
+
+Context:
+I’m finalizing the MVP for Memento, a universal agent trace viewer/debugger.
+I tested all canonical traces across 3 formats (LangChain, LangGraph-like, generic arrays).
+Most of the pipeline works, but a few core issues remain before I can put this in front of early adopters (real agent engineers).
+
+Below is everything that still needs fixing.
+
+⸻
+
+1. FORMAT DETECTION – PRIORITY ORDER IS WRONG
+
+Some traces are being classified as generic even when they contain clear LangChain structure.
+
+Example:
+	•	Simple LangChain weather trace (with intermediate_steps) loads as generic.
+	•	Expected: detect LangChain → map nodes accordingly → then render.
+
+Required fix:
+Implement strict detection priority:
+
+1. LangGraph (flow, nodes, edges)
+2. LangChain (intermediate_steps or structured tool_calls)
+3. Array traces (list of steps)
+4. Generic fallback
+
+Right now “generic” wins too often.
+
+⸻
+
+2. NODE TYPE NORMALIZATION IS INCONSISTENT
+
+Across different formats, identical concepts map to different internal node types.
+This breaks detection, risk scoring, and trace comparisons.
+
+Examples:
+	•	Actions sometimes render as action (correct), sometimes as a plain step.
+	•	Final answers from LangChain sometimes load as thought instead of output.
+	•	Array traces inconsistently decide between observation and action_output.
+
+Required fix:
+Add a normalization layer after parsing:
+
+if step indicates reasoning / chain-of-thought → "thought"
+if step calls a tool or external function → "action"
+if step returns structured data → "observation"
+if step is final AI output → "output"
+
+This must be deterministic across all loaders.
+
+⸻
+
+3. RISK SCORING IS INCONSISTENT
+
+Same type of problem gives different risk levels depending on format.
+
+Examples:
+	•	1 timeout error → sometimes Medium, sometimes High.
+	•	Missing final output → still labeled Low risk (should never be Low).
+	•	Suspicious transitions in generic traces fire correctly, but LangChain traces with incomplete reasoning steps don’t trigger warnings.
+
+Required fix:
+Risk model should be:
+
+Low
+	•	No errors
+	•	No missing required nodes
+	•	No suspicious transitions
+
+Medium
+	•	Exactly 1 error
+	•	OR suspicious transition
+
+High
+	•	2+ errors
+	•	OR missing critical nodes:
+	•	action without observation
+	•	missing final output
+	•	abnormal node jumps
+
+And this logic must apply identically across all loaders.
+
+⸻
+
+4. ERRORS GET DOUBLE-COUNTED IN ARRAY TRACES
+
+In some array traces:
+	•	The observation node carries the error
+	•	The final “result” is also flagged as error
+
+→ Risk scoring then counts two errors when it should be one.
+
+Example:
+Bank transfer trace shows 2 errors detected even though this is a single propagation of the same error.
+
+Required fix:
+Implement error deduplication:
+	•	If multiple nodes reference the same underlying error / message / exception → count it once.
+
+⸻
+
+5. GENERIC LOADER IS TOO PERMISSIVE
+
+Some traces that should trigger warnings render cleanly with no issues.
+
+Example:
+Weather trace with step → action → observation → action → observation…
+If the final output is missing, this should not be Low risk.
+
+Required fix:
+Generic loader must enforce structure checks similar to the others:
+	•	An action must be followed by an observation
+	•	A final answer must be present
+	•	Repeated reasoning loops should be flagged
+
+Currently it fails silently.
+
+⸻
+
+6. COMPARE MODE WORKS, BUT NODE ALIGNMENT IS SOMETIMES OFF
+
+Comparing array vs generic traces works, but when formats differ:
+	•	Node count mismatches cause misalignment
+	•	Node type normalization (see #2) will fix 90% of this
+
+⸻
+
+7. Small UI/UX consistency issues
+
+Not critical, but worth fixing:
+	•	Some nodes show their _globalIndex when others hide internal metadata
+	•	Suspicious transition badge sometimes appears on the wrong side of the node
+	•	Risk icon colors shift slightly between formats
+
+⸻
+
+📌 Summary: What’s working well
+
+To be fair:
+	•	All formats load
+	•	Compare mode works
+	•	Replay works
+	•	Suspicious transitions fire
+	•	Errors are detected
+	•	Parsing is stable
+
+The MVP is close — the pieces are there, they just need to behave consistently.
+
+⸻
+
+🎯 Priority Fix Order
+
+If you want the MVP to feel production-ready:
+	1.	Fix Loader Priority (most important)
+	2.	Normalize Node Types
+	3.	Stabilize Risk Scoring
+	4.	Deduplicate Errors
+	5.	Generic Loader Structure Rules
+
+Once these 5 are done, I can confidently onboard the first engineers.
+
