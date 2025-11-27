@@ -1,11 +1,8 @@
 {
   "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/public",
   "builds": [
-    {
-      "src": "client",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist/public" }
-    },
     {
       "src": "server/index-prod.ts",
       "use": "@vercel/node"
